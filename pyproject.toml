@@ -1,0 +1,44 @@
+[project]
+name = "logflows-knowledge-rag"
+version = "0.1.0"
+description = "Barebones classic RAG service for LOGFLOWS knowledge documents"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.121.0",
+    "uvicorn>=0.34.0",
+    "pydantic>=2.11.1",
+    "pydantic-settings>=2.8.1",
+    "python-dotenv>=1.1.0",
+    "psycopg[binary]>=3.3.2",
+    "psycopg-pool>=3.2.0",
+    "openai>=1.68.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.0",
+    "ruff>=0.11.4",
+    "pyright>=1.1.390",
+]
+
+[tool.pytest.ini_options]
+python_files = ["test_*.py"]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 119
+exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "B"]
+ignore = ["E501", "B008"]
+
+[tool.pyright]
+include = ["app", "tests"]
+exclude = ["**/__pycache__", "**/.venv"]
+pythonVersion = "3.13"
+typeCheckingMode = "standard"
