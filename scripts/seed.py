@@ -4,8 +4,8 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from app.db import close_db, init_db
-from app.retriever import ingest_documents
+from app.core.db import close_db, init_db
+from app.services.retriever import ingest_documents
 
 SAMPLES = Path(__file__).resolve().parents[1] / "data" / "samples"
 

@@ -1,8 +1,8 @@
 """Tenant isolation is enforced in SQL, not in the prompt."""
 
 from app.core.config import settings
-from app.evidence import is_insufficient
-from app.schemas import QueryRequest
+from app.schema.schemas import QueryRequest
+from app.services.evidence import is_insufficient
 
 
 def test_query_contract_includes_tenant() -> None:

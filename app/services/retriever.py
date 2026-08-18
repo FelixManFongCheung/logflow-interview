@@ -2,10 +2,10 @@
 
 from typing import Any
 
-from app.chunking import chunk_text
 from app.core.config import settings
-from app.db import get_pool, vector_literal
-from app.llm import embed_query, embed_texts
+from app.core.db import get_pool, vector_literal
+from app.services.chunking import chunk_text
+from app.services.llm import embed_query, embed_texts
 
 
 async def ingest_documents(tenant_id: str, documents: list[dict[str, str]]) -> dict[str, int]:

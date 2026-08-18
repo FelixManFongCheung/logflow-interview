@@ -7,7 +7,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from app.core.config import settings
 
-SCHEMA_PATH = Path(__file__).resolve().parents[1] / "sql" / "schema.sql"
+SCHEMA_PATH = Path(__file__).resolve().parents[2] / "sql" / "schema.sql"
 _pool: AsyncConnectionPool | None = None
 
 

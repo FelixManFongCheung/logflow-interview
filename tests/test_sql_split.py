@@ -1,6 +1,6 @@
 """Tests for SQL statement splitting used at schema bootstrap."""
 
-from app.db import _iter_sql_statements
+from app.core.db import _iter_sql_statements
 
 
 def test_keeps_dollar_quoted_function() -> None:

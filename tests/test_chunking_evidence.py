@@ -1,7 +1,7 @@
 """Chunking and evidence-gate unit tests."""
 
-from app.chunking import chunk_text
-from app.evidence import confidence_label, is_insufficient
+from app.services.chunking import chunk_text
+from app.services.evidence import confidence_label, is_insufficient
 
 
 def test_chunk_keeps_heading_blocks() -> None:

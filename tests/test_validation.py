@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from app.schemas import IngestRequest, QueryRequest
+from app.schema.schemas import IngestRequest, QueryRequest
 
 
 def test_query_requires_question() -> None:

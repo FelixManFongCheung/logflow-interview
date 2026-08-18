@@ -6,11 +6,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import settings
-from app.db import close_db, init_db
-from app.evidence import confidence_label, is_insufficient
-from app.llm import generate_answer
-from app.retriever import hybrid_search, ingest_documents
-from app.schemas import Citation, IngestRequest, IngestResponse, QueryRequest, QueryResponse
+from app.core.db import close_db, init_db
+from app.schema.schemas import Citation, IngestRequest, IngestResponse, QueryRequest, QueryResponse
+from app.services.evidence import confidence_label, is_insufficient
+from app.services.llm import generate_answer
+from app.services.retriever import hybrid_search, ingest_documents
 
 
 @asynccontextmanager
