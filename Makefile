@@ -21,7 +21,7 @@ db:
 	docker compose up -d db
 
 stop:
-	docker compose down
+	docker compose down -v
 
 dev:
 	uv run uvicorn app.main:app --reload --port 8000
@@ -30,7 +30,7 @@ seed:
 	uv run python scripts/seed.py --tenant-id logflows-demo
 
 seed-docker:
-	docker compose run --rm api python scripts/seed.py --tenant-id logflows-demo
+	docker compose run --rm -e PYTHONPATH=/app api uv run python scripts/seed.py --tenant-id logflows-demo
 
 test:
 	uv run pytest -q
