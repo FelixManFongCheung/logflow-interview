@@ -74,7 +74,7 @@ async def hybrid_search(
     async with pool.connection() as conn:
         rows = await conn.execute(
             """
-            SELECT chunk_id, document_id, title, content, metadata, header_path, score
+            SELECT chunk_id, document_id, title, content, metadata, header_path, score, is_primary_hit
             FROM hybrid_search(%s, %s, %s::vector, %s, 0.3, 0.7, %s, %s, %s)
             """,
             (

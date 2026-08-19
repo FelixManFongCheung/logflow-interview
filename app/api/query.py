@@ -4,6 +4,7 @@ from fastapi import APIRouter, Response
 
 from app.schema.responses import CorrectResponse, ErrorResponse, respond_correct, respond_error
 from app.schema.schemas import Citation, QueryRequest, QueryResponse
+from app.services.context import build_llm_context_blocks, partition_retrieval_hits
 from app.services.evidence import confidence_label, is_insufficient
 from app.services.llm import generate_answer
 from app.services.retriever import hybrid_search
@@ -39,7 +40,9 @@ async def query(body: QueryRequest, response: Response) -> CorrectResponse[Query
             message="hybrid_search_failed",
         )
 
-    scores = [float(hit["score"]) for hit in hits]
+    primary_hits, context_hits = partition_retrieval_hits(hits)
+
+    scores = [float(hit["score"]) for hit in primary_hits]
     citations = [
         Citation(
             document_id=hit["document_id"],
@@ -49,7 +52,7 @@ async def query(body: QueryRequest, response: Response) -> CorrectResponse[Query
             header_path=hit.get("header_path"),
             metadata=_normalize_chunk_metadata(hit.get("metadata")),
         )
-        for hit in hits
+        for hit in primary_hits
     ]
     confidence = confidence_label(scores)
 
@@ -69,7 +72,7 @@ async def query(body: QueryRequest, response: Response) -> CorrectResponse[Query
             message="insufficient_evidence",
         )
 
-    context_blocks = [f"[{hit['document_id']} / {hit['chunk_id']}]\n{hit['content']}" for hit in hits]
+    context_blocks = build_llm_context_blocks(context_hits)
     try:
         answer = await generate_answer(body.question, context_blocks)
     except Exception as exc:

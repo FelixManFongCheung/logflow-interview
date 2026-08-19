@@ -60,7 +60,8 @@ RETURNS TABLE (
     content TEXT,
     metadata JSONB,
     header_path TEXT,
-    score DOUBLE PRECISION
+    score DOUBLE PRECISION,
+    is_primary_hit BOOLEAN
 )
 LANGUAGE sql
 STABLE
@@ -215,7 +216,12 @@ AS $$
         merged.content,
         merged.metadata,
         merged.header_path,
-        merged.score
+        merged.score,
+        EXISTS (
+            SELECT 1
+            FROM ranked r
+            WHERE r.chunk_id = merged.chunk_id
+        ) AS is_primary_hit
     FROM merged
     ORDER BY merged.score DESC, merged.chunk_index ASC
     LIMIT COALESCE(p_max_results, GREATEST(p_match_count * 4, p_match_count));
