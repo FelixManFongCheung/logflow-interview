@@ -22,7 +22,6 @@ db:
 
 stop:
 	docker compose down -v
-
 dev:
 	uv run uvicorn app.main:app --reload --port 8000
 

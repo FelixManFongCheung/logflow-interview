@@ -61,7 +61,11 @@ make seed-docker  # ingest sample docs from inside the API container
 - API: http://localhost:8000/docs
 - Postgres: `localhost:5432` (also reachable as hostname `db` from the API container)
 
-Compose services share a **bridge network**. FastAPI talks to Postgres over TCP (`POSTGRES_HOST=db`). Chunks and embeddings live in the named volume `postgres-data` (owned by Postgres — the API does not mount database files). Sample markdown and `sql/schema.sql` are bind-mounted into the API container so seed/schema stay in sync with the repo.
+Compose services share a **bridge network**. FastAPI talks to Postgres over TCP (`POSTGRES_HOST=db`). Chunks and embeddings live in the named volume `postgres-data` (owned by Postgres).
+
+- The database container mounts `sql/schema.sql` on first boot (`/docker-entrypoint-initdb.d/001-schema.sql`).
+- The API container does **not** mount Postgres data files.
+- `make seed-docker` runs `scripts/seed.py` in a one-off API container and sets `PYTHONPATH=/app` so `app.*` imports resolve correctly.
 
 Stop containers without deleting data: `make stop`. Wipe the volume only if you intend to: `docker compose down -v`.
 
