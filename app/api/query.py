@@ -17,7 +17,7 @@ def _normalize_chunk_metadata(raw: object) -> dict[str, str]:
 
 
 @router.post(
-    "/query",
+    "",
     response_model=CorrectResponse[QueryResponse],
     responses={
         200: {"model": CorrectResponse[QueryResponse], "description": "Answer or controlled refusal"},

@@ -8,7 +8,7 @@ router = APIRouter()
 
 
 @router.post(
-    "/documents/ingest",
+    "",
     response_model=CorrectResponse[IngestResponse],
     responses={
         201: {"model": CorrectResponse[IngestResponse], "description": "Documents indexed"},

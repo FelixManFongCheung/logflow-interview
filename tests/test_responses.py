@@ -55,3 +55,4 @@ def test_ingest_payload_fits_correct_response() -> None:
     payload = IngestResponse(tenant_id="logflows-demo", documents=6, chunks=50)
     wrapped = CorrectResponse(data=payload, message="documents_ingested")
     assert wrapped.data.chunks == 50
+    assert wrapped.data.chunks == 50
