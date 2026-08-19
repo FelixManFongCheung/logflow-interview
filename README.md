@@ -148,15 +148,39 @@ Changing embedding model dimensions requires changing `vector(1024)` in `sql/sch
 ## Project layout
 
 ```text
-app/main.py          FastAPI app + router mount
-app/api/routes.py    /health, /documents/ingest, /query
-app/schema/responses.py  BaseResponse, CorrectResponse, ErrorResponse
-app/services/retriever.py     ingest + hybrid_search RPC call
-app/services/chunking.py      document-aware hierarchical chunking
-app/services/llm.py           embeddings + grounded chat
-app/services/evidence.py      score → refuse / confidence
-sql/schema.sql       table + hybrid_search()  (Supabase RPC)
-data/samples/        six logistics documents
+app/
+  main.py                 FastAPI app, CORS, lifespan, router mount
+  api/
+    api.py                GET /health; mounts ingest + query routers
+    ingest.py             POST /ingest
+    query.py              POST /documents/query
+  core/
+    config.py             env settings (OpenRouter, Postgres, retrieval tuning)
+    db.py                 connection pool + schema bootstrap
+  schema/
+    schemas.py            IngestRequest, QueryRequest, Citation, payloads
+    responses.py          BaseResponse, CorrectResponse, ErrorResponse
+  services/
+    chunking.py           LangChain hierarchical chunking + metadata
+    retriever.py          ingest_documents + hybrid_search RPC
+    llm.py                OpenRouter embeddings + grounded chat
+    evidence.py           score threshold + confidence labels
+
+sql/schema.sql            document_chunks table + hybrid_search() RPC
+
+data/samples/             six logistics markdown docs (SOPs, policies, incident)
+
+scripts/
+  seed.py                 ingest sample docs into a tenant
+  docker-entrypoint.sh    container startup
+
+tests/                    validation, chunking, evidence, response envelopes
+
+docker-compose.yml        Postgres + pgvector (local)
+Dockerfile                API image
+Makefile                  db | install | dev | seed | test
 ```
 
-No LangGraph: this is a linear retrieve-then-generate pipeline.
+**Routes:** `GET /health` · `POST /ingest` · `POST /documents/query`
+
+No LangGraph — linear retrieve-then-generate pipeline.
