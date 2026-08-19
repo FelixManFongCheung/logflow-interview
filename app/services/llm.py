@@ -3,6 +3,7 @@
 from openai import AsyncOpenAI
 
 from app.core.config import settings
+from app.services.prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 _embedding_client: AsyncOpenAI | None = None
 _chat_client: AsyncOpenAI | None = None
@@ -66,20 +67,10 @@ async def generate_answer(question: str, context_blocks: list[str]) -> str:
         model=settings.LLM_MODEL,
         temperature=settings.LLM_TEMPERATURE,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a logistics operations assistant for LOGFLOWS. "
-                    "Answer using ONLY the provided source chunks. "
-                    "If the chunks do not contain the answer, reply exactly: "
-                    "INSUFFICIENT_EVIDENCE. "
-                    "Do not invent SOP ids, phone numbers, temperatures, or SLAs. "
-                    "Be concise and cite document ids inline like [sop-001] when you use them."
-                ),
-            },
+            {"role": "system", "content": SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": f"Question:\n{question}\n\nSource chunks:\n{context}",
+                "content": USER_PROMPT_TEMPLATE.format(question=question, context=context),
             },
         ],
     )
