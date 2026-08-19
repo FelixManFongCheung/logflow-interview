@@ -20,6 +20,7 @@ async def test_query_happy_path_uses_retrieval_and_returns_citations(monkeypatch
             "header_path": "Root > Delay",
             "metadata": {"h1": "Root"},
             "content": "If delayed more than 30 minutes, notify QC.",
+            "is_primary_hit": True,
         }
     ]
 
@@ -32,7 +33,9 @@ async def test_query_happy_path_uses_retrieval_and_returns_citations(monkeypatch
         return hits
 
     async def fake_generate_answer(question: str, context_blocks: list[str]) -> str:
-        assert "sop-001" in context_blocks[0]
+        assert "PRIMARY SOURCE" in context_blocks[0]
+        assert "document_id: sop-001" in context_blocks[0]
+        assert "header_path:" in context_blocks[0]
         return "Notify QC within 10 minutes and document logger status."
 
     monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
@@ -51,6 +54,64 @@ async def test_query_happy_path_uses_retrieval_and_returns_citations(monkeypatch
     assert "Notify QC" in result.data.answer
     assert len(result.data.citations) == 1
     assert result.data.citations[0].document_id == "sop-001"
+
+
+@pytest.mark.asyncio
+async def test_query_citations_exclude_section_context_siblings(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Section-expanded siblings feed the LLM but are not returned as citations."""
+    hits = [
+        {
+            "document_id": "sop-001",
+            "chunk_id": "logflows-demo:sop-001:3",
+            "score": 0.82,
+            "is_primary_hit": True,
+            "title": "Cold Chain SOP",
+            "header_path": "Root > Delay",
+            "metadata": {"h2": "Delay procedure"},
+            "content": "Step 1: notify QC.",
+        },
+        {
+            "document_id": "sop-001",
+            "chunk_id": "logflows-demo:sop-001:4",
+            "score": 0.82,
+            "is_primary_hit": False,
+            "title": "Cold Chain SOP",
+            "header_path": "Root > Delay",
+            "metadata": {"h2": "Delay procedure"},
+            "content": "Step 2: record temperature.",
+        },
+    ]
+
+    captured: dict[str, list[str]] = {}
+
+    async def fake_hybrid_search(
+        tenant_id: str,
+        question: str,
+        match_count: int | None = None,
+        role: str = "ops",
+    ) -> list[dict]:
+        return hits
+
+    async def fake_generate_answer(question: str, context_blocks: list[str]) -> str:
+        captured["context_blocks"] = context_blocks
+        return "Follow the delay procedure [sop-001]."
+
+    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+
+    body = QueryRequest(
+        tenant_id="logflows-demo",
+        user_id="ops-user-01",
+        role="ops",
+        question="What should we do if a cold-chain delivery is delayed?",
+    )
+    result = await query_api.query(body, Response())
+
+    assert result.success is True
+    assert len(result.data.citations) == 1
+    assert result.data.citations[0].chunk_id == "logflows-demo:sop-001:3"
+    assert len(captured["context_blocks"]) == 2
+    assert "SECTION CONTEXT" in captured["context_blocks"][1]
 
 
 @pytest.mark.asyncio

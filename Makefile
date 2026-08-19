@@ -1,9 +1,15 @@
 .DEFAULT_GOAL := help
 
+# Docker Desktop on macOS installs credential helpers outside default PATH.
+DOCKER_APP_BIN := /Applications/Docker.app/Contents/Resources/bin
+ifneq (,$(wildcard $(DOCKER_APP_BIN)/docker-credential-desktop))
+export PATH := $(DOCKER_APP_BIN):$(PATH)
+endif
+
 help:
 	@echo "make start       - Docker Compose: Postgres + FastAPI (http://localhost:8000/docs)"
 	@echo "make db          - start Postgres + pgvector only"
-	@echo "make stop        - stop Compose stack (keeps the postgres-data volume)"
+	@echo "make stop        - stop Compose stack and delete the postgres-data volume"
 	@echo "make install     - uv sync"
 	@echo "make dev         - run API on the host against localhost:5432"
 	@echo "make seed        - ingest sample docs (host Python → localhost:5432)"

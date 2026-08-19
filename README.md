@@ -202,7 +202,18 @@ Legacy `CHUNK_SIZE` / `CHUNK_OVERLAP` char settings remain in config for backwar
 - OpenRouter exposes Qwen embeddings through the OpenAI-compatible `/embeddings` endpoint already used by `app/services/llm.py`.
 - `EMBEDDING_DIMENSIONS=1024` matches the `vector(1024)` column in `document_chunks`.
 - **4B over 0.6B:** better semantic match on logistics terms (“reefer”, “quarantine load”, “wet-ink POD”, `ACME-NIGHT-*`) at negligible cost for ~50 chunks.
-- **Separate from chat:** embeddings stay on Qwen; answers use `google/gemma-4-26b-a4b-it:free` (`LLM_TEMPERATURE=0`) so embedding space stays stable if the free chat route changes.
+
+### Chat model (`google/gemma-4-26b-a4b-it:free` via OpenRouter)
+
+**Not a reasoning model.** Gemma 4 26B IT (`a4b-it`) is an instruction-tuned general chat model — it follows the system prompt and synthesizes answers from provided context. It is not an o1/DeepSeek-R1-style chain-of-thought reasoner, and this pipeline does not need one: retrieval and the evidence gate do the “finding facts” work; the LLM’s job is faithful summarization and citation, not multi-hop inference over unseen data.
+
+**Why Gemma for this take-home:**
+
+- **Free on OpenRouter** (`:free` route) — reviewers can run end-to-end ingest/query with only an API key, no paid chat credits.
+- **Good fit for grounded extraction** — with `LLM_TEMPERATURE=0` and chunks already in the prompt, a mid-size instruction model reliably paraphrases SOP steps and returns the `INSUFFICIENT_EVIDENCE` sentinel when told to.
+- **Kept separate from embeddings** — Qwen handles vectors; chat model choice can change (e.g. swap to another OpenRouter model via `LLM_MODEL`) without re-embedding the corpus.
+
+**What we deliberately did not use:** a reasoning/thinking model. They add latency, cost, and verbosity for little gain when answers must come verbatim from retrieved chunks. Production would likely move to a paid, SLA-backed model (e.g. GPT-4o mini, Claude Haiku) once free-tier limits or quality become a concern.
 
 ### Vector store (PostgreSQL 16 + pgvector, hybrid SQL function)
 
@@ -212,6 +223,7 @@ One database for vectors, full-text search, tenant isolation, and role-based vis
 - **Lexical leg:** generated `tsvector` column + GIN index; `ts_rank_cd` scores keyword matches (policy ids like `SOP-001`, ticket prefixes like `HLD-QC-*`, customer codes)
 - **Retrieval RPC:** `hybrid_search(...)` in `sql/schema.sql` runs semantic and lexical searches in parallel, full-outer-joins on `chunk_id`, ranks by weighted score
 - **Section expansion:** when a hit lands in a markdown section, sibling chunks under the same `header_path` are included (up to `RETRIEVE_MAX_EXPANDED=24`) so “delay handling” returns the full procedure block, not one sentence
+- **Citations vs LLM context:** `hybrid_search` returns `is_primary_hit` — only direct top-k hits appear in API `citations`; section siblings are labeled `SECTION CONTEXT` in the LLM prompt only
 
 `tenant_id` and `visibility`/`role` filters are enforced inside the SQL function.
 
@@ -223,15 +235,16 @@ At 100k+ chunks, add a reranker on the top ~20 hybrid hits before LLM context as
 
 ### Prompt strategy
 
-**Pre-LLM gate** (`app/services/evidence.py`): if `max(hybrid_score) < EVIDENCE_THRESHOLD` (`0.22`), return a fixed refusal without calling the LLM.
+**Pre-LLM gate** (`app/services/evidence.py`): if `max(primary_hybrid_score) < EVIDENCE_THRESHOLD` (`0.22`), return a fixed refusal without calling the LLM. Scoring uses **primary hits only**, not section-expanded siblings.
 
-**LLM path** (`app/services/llm.py`):
+**LLM path** (`app/services/prompts.py` + `app/services/context.py` + `app/services/llm.py`):
 
-- System prompt scoped to LOGFLOWS logistics operations
-- Answer **only** from provided source chunks
-- Reply exactly `INSUFFICIENT_EVIDENCE` when chunks are related but incomplete
-- Do not invent SOP ids, phone numbers, temperatures, or SLAs
-- Request inline citations like `[sop-001]`
+- Domain-specific system prompt for LOGFLOWS SOPs, customer sheets, incidents, and policies
+- Each retrieved row is formatted with: `PRIMARY SOURCE` vs `SECTION CONTEXT`, `document_id`, `chunk_id`, `title`, `header_path`, `h1`/`h2`/`h3` metadata, `retrieval_score`, and body text
+- **Primary sources** = direct hybrid-search hits (also returned as API citations)
+- **Section context** = sibling chunks from the same markdown section (LLM context only — not listed as citations)
+- Answer only from provided sources; honor “out of scope” sections; reply exactly `INSUFFICIENT_EVIDENCE` when incomplete
+- Inline citations like `[sop-001]`; `LLM_TEMPERATURE=0`
 
 **Post-LLM gate:** if the model returns `INSUFFICIENT_EVIDENCE`, citations are cleared and a controlled refusal is returned (handles partially answerable questions the score gate passed).
 
@@ -263,6 +276,24 @@ Tune via `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` in `.env.development
 - No reranking, query rewriting, or streaming responses
 - Live TMS/LMS operational data (shipment status, rates, contracts) is intentionally out of scope
 - Hosted Postgres (e.g. Supabase) works by swapping `POSTGRES_*` env vars and setting `POSTGRES_SSLMODE=require`
+
+## Troubleshooting Docker
+
+**`docker-credential-desktop: executable file not found in $PATH`**
+
+Docker Desktop’s credential helper lives outside default PATH on macOS. The Makefile prepends `/Applications/Docker.app/Contents/Resources/bin` automatically. If you run `docker compose` directly, either:
+
+```bash
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+```
+
+or symlink once:
+
+```bash
+sudo ln -sf /Applications/Docker.app/Contents/Resources/bin/docker-credential-desktop /usr/local/bin/docker-credential-desktop
+```
+
+Also ensure **Docker Desktop is running** before `make start`.
 
 ## Stop / reset
 
