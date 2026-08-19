@@ -1,9 +1,11 @@
 # Commands
 
 ```bash
-make db
+make start        # Docker Compose: Postgres + FastAPI
+make seed-docker  # ingest sample docs from the API container
+make db           # Postgres only
 make install
-make dev
+make dev          # host API against localhost:5432
 make seed
 make test
 ```

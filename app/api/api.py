@@ -8,8 +8,8 @@ from app.schema.responses import CorrectResponse, HealthData, respond_correct
 
 router = APIRouter()
 
-router.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
-router.include_router(query_router, prefix="/documents/query", tags=["query"])
+router.include_router(ingest_router, prefix="/documents/ingest", tags=["ingest"])
+router.include_router(query_router, prefix="/query", tags=["query"])
 
 
 @router.get(

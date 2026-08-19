@@ -3,9 +3,10 @@
 .gitignore
 .github
 
-# Environment files - these will be passed as build args
-.env*
-.env.example
+# Secrets stay on the host; Compose injects them at runtime via env_file / -e
+.env
+.env.*
+!.env.example
 
 # Python
 __pycache__/
@@ -40,25 +41,21 @@ env/
 logs/
 *.log
 
-# Docker
-Dockerfile
+# Docker metadata is not needed inside the image
 .dockerignore
 docker-compose.yml
 
-# Documentation
+# Docs (keep data/samples/*.md for seeding)
 docs/
 README.md
-*.md
+AGENTS.md
+LICENSE
 
 # Build artifacts
 *.pyc
 *.pyo
-*.egg-info
 dist/
 build/
-
-# other
-schema.sql
 
 # Reports
 evals/reports/
