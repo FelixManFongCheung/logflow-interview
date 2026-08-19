@@ -1,10 +1,16 @@
-"""Section-aware chunking for SOP-style documents."""
+"""Document-aware hierarchical chunking via LangChain splitters."""
 
 from __future__ import annotations
 
-import re
+import tiktoken
+from langchain_core.documents import Document
+from langchain_text_splitters import MarkdownHeaderTextSplitter, TokenTextSplitter
 
 from app.core.config import settings
+
+_HEADER_LEVELS = [("#", "h1"), ("##", "h2"), ("###", "h3")]
+_HEADER_KEYS = ("h1", "h2", "h3")
+_TOKEN_ENCODER = tiktoken.get_encoding("cl100k_base")
 
 
 def chunk_text(
@@ -13,31 +19,42 @@ def chunk_text(
     text: str,
     chunk_size: int | None = None,
     overlap: int | None = None,
+    chunk_size_tokens: int | None = None,
+    overlap_tokens: int | None = None,
 ) -> list[dict]:
-    """Split text on headings/paragraphs, then pack into overlapping windows.
+    """Split SOP-style markdown hierarchically, then sub-split by token ceiling.
+
+    Pipeline:
+        1. MarkdownHeaderTextSplitter on # / ## / ### boundaries.
+        2. TokenTextSplitter when a structural block exceeds the token limit.
+        3. Metadata heritage: parent headers copied into each child chunk.
 
     Args:
         document_id: Source document id.
         title: Document title, prefixed into each chunk for retrieval.
         text: Raw document body.
-        chunk_size: Max characters per chunk.
-        overlap: Characters copied from the previous chunk.
+        chunk_size: Legacy character budget; converted to tokens when token args omitted.
+        overlap: Legacy character overlap; converted to tokens when token args omitted.
+        chunk_size_tokens: Max tokens per chunk.
+        overlap_tokens: Token overlap for oversized section splits.
 
     Returns:
-        List of chunk dicts with chunk_id, content, and chunk_index.
+        List of chunk dicts with chunk_id, content, chunk_index, and metadata.
     """
-    size = chunk_size or settings.CHUNK_SIZE
-    overlap = overlap if overlap is not None else settings.CHUNK_OVERLAP
     cleaned = text.strip()
     if not cleaned:
         return []
 
-    sections = _split_sections(cleaned)
-    windows = _pack_windows(sections, size, overlap)
+    size_tokens = _resolve_token_budget(chunk_size_tokens, chunk_size, settings.CHUNK_SIZE_TOKENS)
+    overlap_tok = _resolve_token_budget(overlap_tokens, overlap, settings.CHUNK_OVERLAP_TOKENS)
+
+    header_blocks = _split_by_headers(cleaned)
+    leaf_docs = _split_oversized_blocks(header_blocks, size_tokens, overlap_tok)
+
     chunks: list[dict] = []
-    for index, window in enumerate(windows):
-        body = window.strip()
-        content = f"{title}\n\n{body}" if not body.startswith(title) else body
+    for index, doc in enumerate(leaf_docs):
+        metadata = _inherit_metadata(doc, document_id=document_id, title=title)
+        content = _build_chunk_content(title=title, metadata=metadata, body=doc.page_content)
         chunks.append(
             {
                 "chunk_id": f"{document_id}:{index}",
@@ -45,52 +62,75 @@ def chunk_text(
                 "title": title,
                 "content": content,
                 "chunk_index": index,
+                "metadata": metadata,
             }
         )
     return chunks
 
 
-def _split_sections(text: str) -> list[str]:
-    """Split on markdown headings or blank lines."""
-    heading_split = re.split(r"(?=^#{1,3} )", text, flags=re.MULTILINE)
-    parts = [p.strip() for p in heading_split if p.strip()]
-    if len(parts) > 1:
-        return parts
+def _resolve_token_budget(
+    token_value: int | None,
+    char_value: int | None,
+    default_tokens: int,
+) -> int:
+    """Prefer explicit token limits; fall back to char/4 conversion."""
+    if token_value is not None:
+        return max(token_value, 1)
+    if char_value is not None:
+        return max(char_value // 4, 1)
+    return max(default_tokens, 1)
 
-    paragraphs = re.split(r"\n\s*\n", text)
-    return [p.strip() for p in paragraphs if p.strip()] or [text]
+
+def _split_by_headers(text: str) -> list[Document]:
+    """Layer 1: partition on markdown heading boundaries."""
+    splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=_HEADER_LEVELS,
+        strip_headers=True,
+    )
+    return splitter.split_text(text)
 
 
-def _pack_windows(sections: list[str], size: int, overlap: int) -> list[str]:
-    """Greedy pack sections into windows of at most `size` characters."""
-    windows: list[str] = []
-    current = ""
-    for section in sections:
-        if len(section) > size:
-            if current:
-                windows.append(current.strip())
-                current = ""
-            windows.extend(_split_long(section, size, overlap))
+def _split_oversized_blocks(
+    blocks: list[Document],
+    chunk_size_tokens: int,
+    overlap_tokens: int,
+) -> list[Document]:
+    """Layer 2: recursively split blocks that exceed the token ceiling."""
+    token_splitter = TokenTextSplitter(
+        chunk_size=chunk_size_tokens,
+        chunk_overlap=overlap_tokens,
+    )
+    leaves: list[Document] = []
+    for block in blocks:
+        if _token_count(block.page_content) <= chunk_size_tokens:
+            leaves.append(block)
             continue
-        candidate = f"{current}\n\n{section}".strip() if current else section
-        if len(candidate) <= size:
-            current = candidate
-            continue
-        windows.append(current.strip())
-        current = section
-    if current.strip():
-        windows.append(current.strip())
-    return windows
+        leaves.extend(token_splitter.split_documents([block]))
+    return leaves
 
 
-def _split_long(text: str, size: int, overlap: int) -> list[str]:
-    """Hard-split oversized sections with overlap."""
-    pieces: list[str] = []
-    start = 0
-    while start < len(text):
-        end = min(start + size, len(text))
-        pieces.append(text[start:end].strip())
-        if end == len(text):
-            break
-        start = max(end - overlap, start + 1)
-    return [p for p in pieces if p]
+def _inherit_metadata(doc: Document, document_id: str, title: str) -> dict[str, str]:
+    """Layer 3: copy inherited header context into chunk metadata."""
+    metadata = {key: str(doc.metadata[key]) for key in _HEADER_KEYS if doc.metadata.get(key)}
+    metadata["document_id"] = document_id
+    metadata["document_title"] = title
+    header_path = [metadata[key] for key in _HEADER_KEYS if metadata.get(key)]
+    if header_path:
+        metadata["header_path"] = " > ".join(header_path)
+    return metadata
+
+
+def _build_chunk_content(title: str, metadata: dict[str, str], body: str) -> str:
+    """Render retrieval text with document title and inherited header breadcrumbs."""
+    header_lines = [f"{'#' * int(key[1])} {metadata[key]}" for key in _HEADER_KEYS if metadata.get(key)]
+    parts = [title]
+    if header_lines:
+        parts.append("\n".join(header_lines))
+    if body.strip():
+        parts.append(body.strip())
+    return "\n\n".join(parts)
+
+
+def _token_count(text: str) -> int:
+    """Count tokens using the same encoding family as TokenTextSplitter."""
+    return len(_TOKEN_ENCODER.encode(text))

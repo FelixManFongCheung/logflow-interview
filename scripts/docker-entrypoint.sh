@@ -13,8 +13,8 @@ elif [ -f ".env" ]; then
     set +a
 fi
 
-if [ -z "${OPENAI_API_KEY}" ]; then
-    echo "ERROR: OPENAI_API_KEY is required"
+if [ -z "${OPENROUTER_API_KEY}" ]; then
+    echo "ERROR: OPENROUTER_API_KEY is required"
     exit 1
 fi
 

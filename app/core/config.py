@@ -1,6 +1,7 @@
 """Application settings loaded from environment variables."""
 
 from pathlib import Path
+from urllib.parse import quote, unquote
 
 from dotenv import load_dotenv
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,10 +23,12 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "*"
 
-    OPENAI_API_KEY: str = ""
-    OPENAI_BASE_URL: str | None = None
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
-    LLM_MODEL: str = "gpt-4.1-mini"
+    # OpenRouter is OpenAI-compatible: same /chat/completions and /embeddings paths.
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    EMBEDDING_MODEL: str = "qwen/qwen3-embedding-4b"
+    EMBEDDING_DIMENSIONS: int = 1024
+    LLM_MODEL: str = "google/gemma-4-26b-a4b-it:free"
     LLM_TEMPERATURE: float = 0.0
 
     POSTGRES_HOST: str = "localhost"
@@ -33,10 +36,15 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "ragdb"
     POSTGRES_USER: str = "raguser"
     POSTGRES_PASSWORD: str = "ragpassword"
+    POSTGRES_SSLMODE: str = "prefer"
 
     CHUNK_SIZE: int = 900
     CHUNK_OVERLAP: int = 120
+    CHUNK_SIZE_TOKENS: int = 256
+    CHUNK_OVERLAP_TOKENS: int = 32
     RETRIEVE_K: int = 6
+    EXPAND_SECTION_SIBLINGS: bool = True
+    RETRIEVE_MAX_EXPANDED: int = 24
     EVIDENCE_THRESHOLD: float = 0.22
     HIGH_CONFIDENCE_THRESHOLD: float = 0.45
 
@@ -50,10 +58,13 @@ class Settings(BaseSettings):
 
     @property
     def postgres_dsn(self) -> str:
-        """Async Postgres DSN for psycopg."""
+        """Async Postgres DSN for psycopg (password URL-encoded; SSL for hosted DBs)."""
+        user = quote(unquote(self.POSTGRES_USER), safe="")
+        password = quote(unquote(self.POSTGRES_PASSWORD), safe="")
         return (
-            f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+            f"postgresql://{user}:{password}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            f"?sslmode={self.POSTGRES_SSLMODE}"
         )
 
 

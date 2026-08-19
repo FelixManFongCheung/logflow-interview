@@ -45,6 +45,8 @@ class Citation(BaseModel):
     chunk_id: str
     score: float
     title: str | None = None
+    header_path: str | None = None
+    metadata: dict[str, str] = Field(default_factory=dict)
 
 
 class QueryResponse(BaseModel):

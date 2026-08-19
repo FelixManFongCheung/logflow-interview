@@ -41,7 +41,9 @@ Live TMS/LMS shipment rows are **out of scope**. This service answers from index
 
 ```bash
 cp .env.example .env.development
-# set OPENAI_API_KEY (or OPENAI_BASE_URL for a compatible provider)
+# set OPENROUTER_API_KEY to an OpenRouter key (Hong Kong: do not use api.openai.com)
+# https://openrouter.ai/keys
+# OPENROUTER_BASE_URL defaults to https://openrouter.ai/api/v1
 
 make db          # Postgres + pgvector
 make install
@@ -101,6 +103,7 @@ CORS defaults to `*` so a TMS web app or mobile client can call these two routes
 | What should we do if a cold-chain delivery is delayed? | **Answerable** from `sop-001` (30 min, QC, temperature band) |
 | What should we do after a reefer logger gap on yogurt to Berlin? | **Partial** — `inc-2026-014` describes one incident; it does not replace SOP-001 |
 | What is ACME’s contracted freight rate to Hamburg? | **Unanswerable** — `insufficient_evidence: true`, no invented rates |
+| How do we handle a broken inbound seal? | **Answerable** from `sop-006` (long SOP; stored as multiple `sop-006:N` chunks) |
 
 Documents live in `data/samples/`. Visibility: warehouse escalation and the incident are `ops`-only; `role=cs` should not retrieve them.
 
@@ -109,14 +112,14 @@ Documents live in `data/samples/`. Visibility: warehouse escalation and the inci
 | Choice | Value | Why |
 |--------|--------|-----|
 | Chunking | ~900 chars, heading/paragraph split, 120 overlap | Avoid cutting SOP steps in half |
-| Embeddings | `text-embedding-3-small` (1536-d) | Cheap, good enough for 5–10k chunks |
+| Embeddings | OpenRouter `qwen/qwen3-embedding-4b` (1024-d via `dimensions`) | OpenAI-compatible `/embeddings`; works from Hong Kong |
 | Vector store | pgvector HNSW + GIN on `tsvector` | Hybrid: semantic + keyword (`SOP-001`) |
 | Hybrid weights | 0.7 cosine, 0.3 full-text | Keywords help ids; semantics help paraphrases |
 | Evidence gate | refuse if top hybrid score `< 0.22` | Stops “helpful” hallucination |
 | Access control | `tenant_id` **and** `visibility`/`role` in SQL | Prompt-only isolation is not isolation |
-| LLM | temperature 0, “ONLY from chunks” | Grounding |
+| LLM | OpenRouter `google/gemma-4-26b-a4b-it:free`, temperature 0, “ONLY from chunks” | Separate chat client; free route (Qwen chat needs credits) |
 
-Changing embedding model dimensions requires changing `vector(1536)` in `sql/schema.sql`.
+Changing embedding model dimensions requires changing `vector(1024)` in `sql/schema.sql` and re-ingesting.
 
 ## Production notes (not built)
 

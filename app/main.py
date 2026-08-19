@@ -13,6 +13,13 @@ from app.services.llm import generate_answer
 from app.services.retriever import hybrid_search, ingest_documents
 
 
+def _normalize_chunk_metadata(raw: object) -> dict[str, str]:
+    """Coerce JSONB metadata from Postgres into citation-safe string values."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): str(value) for key, value in raw.items() if value is not None}
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Open Postgres and apply schema on startup."""
@@ -71,6 +78,8 @@ async def query(body: QueryRequest) -> QueryResponse:
             chunk_id=hit["chunk_id"],
             score=round(float(hit["score"]), 4),
             title=hit.get("title"),
+            header_path=hit.get("header_path"),
+            metadata=_normalize_chunk_metadata(hit.get("metadata")),
         )
         for hit in hits
     ]
@@ -98,7 +107,7 @@ async def query(body: QueryRequest) -> QueryResponse:
                 "The retrieved documents are related but do not contain a complete answer. "
                 "I will not guess missing operational details."
             ),
-            citations=citations,
+            citations=[],
             confidence="low",
             insufficient_evidence=True,
         )

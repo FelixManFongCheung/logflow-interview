@@ -1,0 +1,40 @@
+# Document-Aware Hierarchical Chunking (LangChain)
+
+This rule defines the implementation path for hierarchical chunking of operational documents (SOPs, rules, procedures) in `app/services/chunking.py`.
+
+## 1. System Architecture
+
+The chunking pipeline executes three sequential layers via LangChain text splitters:
+
+1. **MarkdownHeaderTextSplitter** — Partitions the document into native structural blocks using `#`, `##`, and `###` markers as primary boundaries.
+2. **TokenTextSplitter** — Evaluates each header block. If a section exceeds the token ceiling (`CHUNK_SIZE_TOKENS`), split recursively on token boundaries to avoid mid-sentence truncation where possible.
+3. **Metadata Heritage Engine** — Inherits parent header context (`h1`, `h2`, `h3`, `header_path`, `document_title`) into every child chunk's `metadata` dict and prepends header breadcrumbs into `content` for retrieval.
+
+## 2. Configuration
+
+| Setting | Default | Purpose |
+|---------|---------|---------|
+| `CHUNK_SIZE_TOKENS` | 256 | Max tokens per leaf chunk |
+| `CHUNK_OVERLAP_TOKENS` | 32 | Token overlap when sub-splitting oversized sections |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 900 / 120 | Legacy char budgets; converted to tokens (÷4) when token settings omitted |
+
+## 3. Chunk Output Contract
+
+Each chunk dict must include:
+
+- `chunk_id` — `{document_id}:{index}`
+- `document_id`, `title`, `content`, `chunk_index`
+- `metadata` — inherited headers plus `document_id`, `document_title`, optional `header_path`
+
+`content` is what gets embedded and stored in Postgres. It always starts with the document title, then markdown header breadcrumbs, then the section body.
+
+## 4. Design Constraints
+
+- Do **not** split inside markdown table rows when the whole `##` section fits under the token ceiling.
+- Prefer `strip_headers=True` on the header splitter; rebuild header context from metadata to avoid duplication.
+- Use `tiktoken` (`cl100k_base`) for token counting — same family as `TokenTextSplitter`.
+- Keep `chunk_text()` as the public ingest API; retriever code should not import LangChain splitters directly.
+
+## 5. When to Extend
+
+Add deterministic table flattening or parent-child chunk linking only after eval shows table/section queries under-retrieve. Do not add LLM-based table transformation at ingest unless tables are large or structurally broken.

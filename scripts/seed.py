@@ -40,6 +40,12 @@ DOCS = [
         "file": "pol-haz-005-labels.md",
         "visibility": "all",
     },
+    {
+        "id": "sop-006",
+        "title": "Inbound Receiving SOP",
+        "file": "sop-006-inbound-receiving.md",
+        "visibility": "all",
+    },
 ]
 
 

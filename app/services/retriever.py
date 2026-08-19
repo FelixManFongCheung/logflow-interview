@@ -1,5 +1,6 @@
 """Ingest and hybrid retrieval against Postgres/pgvector."""
 
+import json
 from typing import Any
 
 from app.core.config import settings
@@ -34,12 +35,15 @@ async def ingest_documents(tenant_id: str, documents: list[dict[str, str]]) -> d
                     (tenant_id, document["id"]),
                 )
             for chunk, embedding in zip(prepared, embeddings, strict=True):
+                chunk_metadata = chunk.get("metadata") or {}
+                header_path = chunk_metadata.get("header_path")
                 await conn.execute(
                     """
                     INSERT INTO document_chunks (
-                        chunk_id, tenant_id, document_id, title, content, chunk_index, visibility, embedding
+                        chunk_id, tenant_id, document_id, title, content,
+                        chunk_index, visibility, metadata, header_path, embedding
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s::vector)
                     """,
                     (
                         f"{tenant_id}:{chunk['chunk_id']}",
@@ -49,6 +53,8 @@ async def ingest_documents(tenant_id: str, documents: list[dict[str, str]]) -> d
                         chunk["content"],
                         chunk["chunk_index"],
                         chunk.get("visibility", "all"),
+                        json.dumps(chunk_metadata),
+                        header_path,
                         vector_literal(embedding),
                     ),
                 )
@@ -68,9 +74,17 @@ async def hybrid_search(
     async with pool.connection() as conn:
         rows = await conn.execute(
             """
-            SELECT chunk_id, document_id, title, content, score
-            FROM hybrid_search(%s, %s, %s::vector, %s, 0.3, 0.7, %s)
+            SELECT chunk_id, document_id, title, content, metadata, header_path, score
+            FROM hybrid_search(%s, %s, %s::vector, %s, 0.3, 0.7, %s, %s, %s)
             """,
-            (tenant_id, question, vector_literal(embedding), k, role),
+            (
+                tenant_id,
+                question,
+                vector_literal(embedding),
+                k,
+                role,
+                settings.EXPAND_SECTION_SIBLINGS,
+                settings.RETRIEVE_MAX_EXPANDED,
+            ),
         )
         return list(await rows.fetchall())
