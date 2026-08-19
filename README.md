@@ -85,14 +85,28 @@ Expected shape:
 
 ```json
 {
-  "answer": "...notify QC within 10 minutes...",
-  "citations": [
-    {"document_id": "sop-001", "chunk_id": "logflows-demo:sop-001:0", "score": 0.82, "title": "Cold Chain SOP"}
-  ],
-  "confidence": "medium",
-  "insufficient_evidence": false
+  "success": true,
+  "message": "query_answered",
+  "data": {
+    "answer": "...notify QC within 10 minutes...",
+    "citations": [
+      {
+        "document_id": "sop-001",
+        "chunk_id": "logflows-demo:sop-001:0",
+        "score": 0.82,
+        "title": "Cold Chain SOP",
+        "header_path": "Cold Chain SOP (SOP-001) > Delay procedure",
+        "metadata": {}
+      }
+    ],
+    "confidence": "medium",
+    "insufficient_evidence": false
+  }
 }
 ```
+
+Errors use HTTP 502 with `{ "success": false, "error_code": "...", "detail": "...", "message": "..." }`.
+Ingest success returns HTTP 201; query and health return HTTP 200.
 
 CORS defaults to `*` so a TMS web app or mobile client can call these two routes.
 
@@ -134,13 +148,15 @@ Changing embedding model dimensions requires changing `vector(1024)` in `sql/sch
 ## Project layout
 
 ```text
-app/main.py          FastAPI: /documents/ingest, /query, /health
-app/retriever.py     ingest + hybrid_search RPC call
-app/chunking.py      section-aware windows
-app/llm.py           embeddings + grounded chat
-app/evidence.py      score → refuse / confidence
+app/main.py          FastAPI app + router mount
+app/api/routes.py    /health, /documents/ingest, /query
+app/schema/responses.py  BaseResponse, CorrectResponse, ErrorResponse
+app/services/retriever.py     ingest + hybrid_search RPC call
+app/services/chunking.py      document-aware hierarchical chunking
+app/services/llm.py           embeddings + grounded chat
+app/services/evidence.py      score → refuse / confidence
 sql/schema.sql       table + hybrid_search()  (Supabase RPC)
-data/samples/        five logistics documents
+data/samples/        six logistics documents
 ```
 
 No LangGraph: this is a linear retrieve-then-generate pipeline.

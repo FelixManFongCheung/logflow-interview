@@ -7,6 +7,7 @@ from app.core.config import settings
 _embedding_client: AsyncOpenAI | None = None
 _chat_client: AsyncOpenAI | None = None
 
+
 def _make_openrouter_client() -> AsyncOpenAI:
     """OpenAI SDK pointed at OpenRouter (same REST shape as /api/v1/chat/completions)."""
     return AsyncOpenAI(
