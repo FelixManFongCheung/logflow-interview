@@ -1,3 +1,5 @@
+"""Grounded query API route."""
+
 from fastapi import APIRouter, Response
 
 from app.schema.responses import CorrectResponse, ErrorResponse, respond_correct, respond_error

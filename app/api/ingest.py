@@ -1,6 +1,8 @@
+"""Document ingest API route."""
+
 from fastapi import APIRouter, Response
 
-from app.schema.responses import CorrectResponse, ErrorResponse, HealthData, respond_correct, respond_error
+from app.schema.responses import CorrectResponse, ErrorResponse, respond_correct, respond_error
 from app.schema.schemas import IngestRequest, IngestResponse
 from app.services.retriever import ingest_documents
 
