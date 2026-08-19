@@ -149,36 +149,36 @@ Changing embedding model dimensions requires changing `vector(1024)` in `sql/sch
 
 ```text
 app/
-  main.py                 FastAPI app, CORS, lifespan, router mount
+  main.py                 # FastAPI app, CORS, lifespan, router mount
   api/
-    api.py                GET /health; mounts ingest + query routers
-    ingest.py             POST /ingest
-    query.py              POST /documents/query
+    api.py                # GET /health; mounts ingest + query routers
+    ingest.py             # POST /ingest
+    query.py              # POST /documents/query
   core/
-    config.py             env settings (OpenRouter, Postgres, retrieval tuning)
-    db.py                 connection pool + schema bootstrap
+    config.py             # env settings (OpenRouter, Postgres, retrieval tuning)
+    db.py                 # connection pool + schema bootstrap
   schema/
-    schemas.py            IngestRequest, QueryRequest, Citation, payloads
-    responses.py          BaseResponse, CorrectResponse, ErrorResponse
+    schemas.py            # IngestRequest, QueryRequest, Citation, payloads
+    responses.py          # BaseResponse, CorrectResponse, ErrorResponse
   services/
-    chunking.py           LangChain hierarchical chunking + metadata
-    retriever.py          ingest_documents + hybrid_search RPC
-    llm.py                OpenRouter embeddings + grounded chat
-    evidence.py           score threshold + confidence labels
+    chunking.py           # LangChain hierarchical chunking + metadata
+    retriever.py          # ingest_documents + hybrid_search RPC
+    llm.py                # OpenRouter embeddings + grounded chat
+    evidence.py           # score threshold + confidence labels
 
-sql/schema.sql            document_chunks table + hybrid_search() RPC
+sql/schema.sql            # document_chunks table + hybrid_search() RPC
 
-data/samples/             six logistics markdown docs (SOPs, policies, incident)
+data/samples/             # six logistics markdown docs (SOPs, policies, incident)
 
 scripts/
-  seed.py                 ingest sample docs into a tenant
-  docker-entrypoint.sh    container startup
+  seed.py                 # ingest sample docs into a tenant
+  docker-entrypoint.sh    # container startup
 
-tests/                    validation, chunking, evidence, response envelopes
+tests/                    # validation, chunking, evidence, response envelopes
 
-docker-compose.yml        Postgres + pgvector (local)
-Dockerfile                API image
-Makefile                  db | install | dev | seed | test
+docker-compose.yml        # Postgres + pgvector (local)
+Dockerfile                # API image
+Makefile                  # db | install | dev | seed | test
 ```
 
 **Routes:** `GET /health` · `POST /ingest` · `POST /documents/query`
