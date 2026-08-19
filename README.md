@@ -137,13 +137,54 @@ Changing embedding model dimensions requires changing `vector(1024)` in `sql/sch
 
 ## Production notes (not built)
 
-- **Auth:** gateway JWT; map to `tenant_id` / `role`. Do not trust tenant in the body in production.
-- **Updates/deletes:** ingest already replaces chunks for `(tenant_id, document_id)`. Add `DELETE /documents/{id}`.
-- **Scale (1M docs, 100 tenants):** partition or schema-per-tenant; HNSW per partition; async embed workers; cache query embeddings.
-- **Observability:** log tenant, user, chunk ids, scores, latency, token usage — not full SOP text.
-- **Privacy:** SOPs may include customer names; keep indexes in-region; redact before third-party LLMs if required.
-- **Cost:** embed once at ingest; retrieve_k=6; skip LLM on refusal.
-- **Hallucination remaining:** LLM can still misread a retrieved chunk; citations let ops verify. Add an eval set (hit@k, faithfulness) before production.
+These are intentional boundaries and follow-ups for a LOGFLOWS-style deployment — the take-home implements the core RAG path only.
+
+### Auth and access control
+
+- **Identity:** API gateway validates JWT (or mTLS); map claims → `user_id`, `tenant_id`, `role`. Do not trust those fields from the request body in production.
+- **Tenant membership:** maintain a user→tenant registry; reject queries where the caller is not a member of the requested tenant.
+- **Ingest authorization:** restrict document indexing to `ops` / `admin` roles; CS and read-only roles query only.
+- **Document visibility:** keep filtering in SQL (`visibility` + `role`) — not in the LLM prompt. `user_id` is for audit, not chunk-level ACL in v1.
+
+### Document lifecycle
+
+- **Upsert:** ingest already replaces all chunks for `(tenant_id, document_id)` on re-ingest.
+- **Delete:** add `DELETE /documents/{id}` with the same role gate as ingest; cascade chunk rows and optionally tombstone in an audit log.
+- **Versioning:** store `ingested_at`, `ingested_by`, and source hash per document for rollback and compliance.
+
+### Scale (1M docs × 100 tenants)
+
+- Partition `document_chunks` by `tenant_id` (or schema-per-tenant for largest customers).
+- Rebuild HNSW / GIN indexes per partition; tune `lists` / `m` as row counts grow.
+- Async ingest workers for embedding (queue + batch API calls); API returns 202 + job id for large uploads.
+- Read replicas for hybrid search; writer primary for ingest only.
+
+### Observability
+
+- Structured logs (structlog): `tenant_id`, `user_id`, `question_hash`, `chunk_ids`, top scores, latency ms, token usage — **never** full SOP body text.
+- Metrics: ingest throughput, query p95, refusal rate, embed/LLM error rate, cache hit rate.
+- Tracing: span per request — embed → `hybrid_search` → evidence gate → LLM (when called).
+
+### Privacy and compliance
+
+- Keep Postgres indexes in-region with the tenant contract (EU data stays in EU).
+- SOPs may name customers and sites; redact or tokenize before sending context to third-party LLMs if DPA requires it.
+- Pseudonymise `user_id` in analytics; retain raw ids only in security audit logs with retention policy.
+
+### Cost and latency
+
+- **Embed once at ingest** — query path pays one embed + one RPC + (optionally) one LLM call.
+- **`RETRIEVE_K=6`** with section expansion capped by `RETRIEVE_MAX_EXPANDED`.
+- **Skip LLM when `max(score) < EVIDENCE_THRESHOLD`** (retrieval gate). Borderline “related but not answerable” questions may still invoke the LLM today — raising the threshold or adding a reranker are tunable trade-offs.
+- **Query embedding cache** (Redis, keyed by normalised question + tenant): skip DB vector search on near-duplicate questions; invalidate on document re-ingest for that tenant.
+- **Answer cache** (optional, short TTL): cache `(tenant, question_hash) → response` for repeated ops desk queries — only when citations unchanged.
+
+### Quality, eval, and human-in-the-loop
+
+- **Offline eval:** fixed question set with expected `document_id`s, hit@k, refusal accuracy, and LLM faithfulness checks before each release.
+- **Online monitoring:** sample production queries for manual review; track citation click-through in the TMS UI.
+- **Human-in-the-loop:** ops can flag wrong answers → feeds chunking/threshold/prompt updates (not automatic fine-tuning in v1).
+- **Remaining hallucination risk:** LLM can misread a correct chunk; citations + `header_path` let users verify. Per-chunk score floors and reranking reduce but do not eliminate this.
 
 ## Project layout
 
