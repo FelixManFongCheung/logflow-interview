@@ -1,21 +1,3 @@
--- Classic RAG store: tenant-scoped chunks + hybrid search RPC.
--- Same function signature works locally and as a Supabase RPC:
---   supabase.rpc('hybrid_search', {
---     p_tenant_id, p_query_text, p_query_embedding, p_match_count, p_role,
---     p_expand_sections: true, p_max_results: 24
---   })
---
--- Chunk rows store hierarchical section metadata from document-aware chunking
--- (h1/h2/h3, header_path, document_title) alongside flat retrieval fields.
-
--- If you previously created this table with vector(1536), drop and re-run:
---   DROP FUNCTION IF EXISTS hybrid_search(TEXT, TEXT, vector, INTEGER, DOUBLE PRECISION, DOUBLE PRECISION, TEXT);
---   DROP TABLE IF EXISTS document_chunks;
---
--- If upgrading an existing table, these ALTERs add metadata columns idempotently:
---   ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}';
---   ALTER TABLE document_chunks ADD COLUMN IF NOT EXISTS header_path TEXT;
-
 CREATE EXTENSION IF NOT EXISTS vector;
 
 CREATE TABLE IF NOT EXISTS document_chunks (

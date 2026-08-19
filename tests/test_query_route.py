@@ -56,6 +56,7 @@ async def test_query_happy_path_uses_retrieval_and_returns_citations(monkeypatch
 @pytest.mark.asyncio
 async def test_query_insufficient_evidence_skips_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     """Low-score hits should return controlled refusal without calling the LLM."""
+
     async def fake_hybrid_search(
         tenant_id: str,
         question: str,
