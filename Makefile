@@ -1,23 +1,36 @@
 .DEFAULT_GOAL := help
 
 help:
-	@echo "make db          - start Postgres + pgvector"
+	@echo "make start       - Docker Compose: Postgres + FastAPI (http://localhost:8000/docs)"
+	@echo "make db          - start Postgres + pgvector only"
+	@echo "make stop        - stop Compose stack (keeps the postgres-data volume)"
 	@echo "make install     - uv sync"
-	@echo "make dev         - run API on :8000"
-	@echo "make seed        - ingest sample logistics documents"
+	@echo "make dev         - run API on the host against localhost:5432"
+	@echo "make seed        - ingest sample docs (host Python → localhost:5432)"
+	@echo "make seed-docker - ingest sample docs from the API container → db"
 	@echo "make test        - unit tests (no live LLM)"
 
 install:
 	uv sync
 
+start:
+	docker compose up --build -d
+	@echo "API: http://localhost:8000/docs  (seed with: make seed-docker)"
+
 db:
 	docker compose up -d db
+
+stop:
+	docker compose down
 
 dev:
 	uv run uvicorn app.main:app --reload --port 8000
 
 seed:
 	uv run python scripts/seed.py --tenant-id logflows-demo
+
+seed-docker:
+	docker compose run --rm api python scripts/seed.py --tenant-id logflows-demo
 
 test:
 	uv run pytest -q

@@ -11,7 +11,7 @@ Classic RAG backend for logistics **knowledge documents** (SOPs, policies, incid
 | Chroma / FAISS | Vector only unless you add a second index | Easy to forget in app code | Weaker for SOP **ids** (`SOP-001`) |
 | Azure AI Search | Strong hybrid | Native filters | Production mapping, extra account |
 
-This repo uses **local Docker Postgres**. The function in `sql/schema.sql` is written so you can paste it into Supabase SQL editor and call:
+This repo defaults to **local Docker Postgres**. The function in `sql/schema.sql` is written so you can paste it into Supabase SQL editor and call:
 
 ```js
 supabase.rpc('hybrid_search', {
@@ -27,7 +27,7 @@ supabase.rpc('hybrid_search', {
 
 ```text
 POST /documents/ingest
-  → validate → section-aware chunk → embed → DELETE+INSERT chunks (per tenant + document_id)
+  → validate → hierarchical markdown chunk → embed → DELETE+INSERT chunks (per tenant + document_id)
 
 POST /query
   → embed question → hybrid_search(tenant_id, role)   ← isolation in SQL
@@ -39,20 +39,45 @@ Live TMS/LMS shipment rows are **out of scope**. This service answers from index
 
 ## Setup
 
-```bash
-cp .env.example .env.development
-# set OPENROUTER_API_KEY to an OpenRouter key (Hong Kong: do not use api.openai.com)
-# https://openrouter.ai/keys
-# OPENROUTER_BASE_URL defaults to https://openrouter.ai/api/v1
+Typical reviewer flow: clone locally, create env from template, add **your own** secrets, then run Compose.
 
-make db          # Postgres + pgvector
+```bash
+git clone <your-repo-url>
+cd logflows-interview
+cp .env.example .env.development
+# REQUIRED: set your own OPENROUTER_API_KEY — https://openrouter.ai/keys
+# Never commit .env.development
+```
+
+### One-command Docker (API + Postgres)
+
+Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, then:
+
+```bash
+make start        # builds the API image, starts db + api
+make seed-docker  # ingest sample docs from inside the API container
+```
+
+- API: http://localhost:8000/docs
+- Postgres: `localhost:5432` (also reachable as hostname `db` from the API container)
+
+Compose services share a **bridge network**. FastAPI talks to Postgres over TCP (`POSTGRES_HOST=db`). Chunks and embeddings live in the named volume `postgres-data` (owned by Postgres — the API does not mount database files). Sample markdown and `sql/schema.sql` are bind-mounted into the API container so seed/schema stay in sync with the repo.
+
+Stop containers without deleting data: `make stop`. Wipe the volume only if you intend to: `docker compose down -v`.
+
+### Host API + Docker Postgres
+
+```bash
+make db          # Postgres + pgvector only
 make install
+make seed        # 6 sample logistics docs → tenant logflows-demo
 make dev         # http://localhost:8000/docs
-make seed        # 5 sample logistics docs → tenant logflows-demo
 make test
 ```
 
-`POSTGRES_HOST=localhost` when the API runs on the host. Use `db` only if the API also runs in Compose.
+`POSTGRES_HOST=localhost` when the API runs on the host. Compose sets `POSTGRES_HOST=db` when the API runs in Docker.
+
+Supabase is optional: same schema, swap host/user/ssl in `.env.development`. Reviewers do not need a cloud project.
 
 ## API
 
@@ -121,11 +146,54 @@ CORS defaults to `*` so a TMS web app or mobile client can call these two routes
 
 Documents live in `data/samples/`. Visibility: warehouse escalation and the incident are `ops`-only; `role=cs` should not retrieve them.
 
+## Chunking strategy
+
+Implemented in `app/services/chunking.py` — LangChain hierarchical split, not fixed-size paragraph windows.
+
+### Pipeline
+
+```text
+Markdown body
+  → Layer 1: MarkdownHeaderTextSplitter (# / ## / ###)
+  → Layer 2: TokenTextSplitter only when a section exceeds the token ceiling
+  → Layer 3: inherit h1/h2/h3 + header_path into metadata and embedded content
+```
+
+| Layer | Splitter | Overlap? |
+|-------|----------|----------|
+| **1 — Structure** | Split on `#`, `##`, `###` | No — each heading block is a separate unit |
+| **2 — Size cap** | Sub-split blocks over `CHUNK_SIZE_TOKENS` | Yes — `CHUNK_OVERLAP_TOKENS` sliding window **within** that section only |
+| **3 — Context** | Prefix title + header breadcrumbs into `content` | N/A — repeated header lines on sub-chunks for retrieval, not token overlap |
+
+Short sections (e.g. a temperature table under one `##`) stay **one chunk**. Long SOPs (e.g. `sop-006`) produce multiple sub-chunks under the same `header_path`.
+
+### Stored fields
+
+Each chunk row gets:
+
+- **`content`** — `{title}\n\n{## headers}\n\n{body}` (what gets embedded)
+- **`metadata`** (JSONB) — `h1`, `h2`, `h3`, `document_id`, `document_title`, `header_path`
+- **`header_path`** (column) — breadcrumb such as `Cold Chain SOP (SOP-001) > Delay procedure`, used by `hybrid_search` for **section expansion** at query time (sibling chunks under the same heading)
+
+### Defaults (`app/core/config.py`)
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `CHUNK_SIZE_TOKENS` | 256 | Max tokens per section body before sub-split |
+| `CHUNK_OVERLAP_TOKENS` | 32 | Overlap when layer 2 runs; most sample docs never hit this |
+| `CHUNK_SIZE` / `CHUNK_OVERLAP` | 900 / 120 | Legacy char fallbacks if passed explicitly to `chunk_text()` |
+
+Tune via env vars; re-ingest after changes.
+
+### Query-time section expansion
+
+Top-k hybrid hits with the same `(document_id, header_path)` can pull in sibling chunks from that section (`EXPAND_SECTION_SIBLINGS=true`, cap `RETRIEVE_MAX_EXPANDED=24`). This compensates when a procedure spans several sub-chunks but one paragraph matched the question.
+
 ## Key decisions
 
 | Choice | Value | Why |
 |--------|--------|-----|
-| Chunking | ~900 chars, heading/paragraph split, 120 overlap | Avoid cutting SOP steps in half |
+| Chunking | Hierarchical `#`/`##`/`###`, 256 tokens, 32-token overlap on long sections only | Keeps tables and steps intact; `header_path` enables sibling expansion at query time |
 | Embeddings | OpenRouter `qwen/qwen3-embedding-4b` (1024-d via `dimensions`) | OpenAI-compatible `/embeddings`; works from Hong Kong |
 | Vector store | pgvector HNSW + GIN on `tsvector` | Hybrid: semantic + keyword (`SOP-001`) |
 | Hybrid weights | 0.7 cosine, 0.3 full-text | Keywords help ids; semantics help paraphrases |
@@ -193,8 +261,8 @@ app/
   main.py                 # FastAPI app, CORS, lifespan, router mount
   api/
     api.py                # GET /health; mounts ingest + query routers
-    ingest.py             # POST /ingest
-    query.py              # POST /documents/query
+    ingest.py             # POST /documents/ingest
+    query.py              # POST /query
   core/
     config.py             # env settings (OpenRouter, Postgres, retrieval tuning)
     db.py                 # connection pool + schema bootstrap
@@ -213,15 +281,14 @@ data/samples/             # six logistics markdown docs (SOPs, policies, inciden
 
 scripts/
   seed.py                 # ingest sample docs into a tenant
-  docker-entrypoint.sh    # container startup
 
 tests/                    # validation, chunking, evidence, response envelopes
 
-docker-compose.yml        # Postgres + pgvector (local)
+docker-compose.yml        # db (Postgres) + api (FastAPI) + postgres-data volume
 Dockerfile                # API image
-Makefile                  # db | install | dev | seed | test
+Makefile                  # start | db | stop | install | dev | seed | seed-docker | test
 ```
 
-**Routes:** `GET /health` · `POST /ingest` · `POST /documents/query`
+**Routes:** `GET /health` · `POST /documents/ingest` · `POST /query`
 
 No LangGraph — linear retrieve-then-generate pipeline.
