@@ -34,7 +34,7 @@ Loads from `.env.development` → `.env` → `.env.example`.
 | `CHUNK_SIZE_TOKENS` / `CHUNK_OVERLAP_TOKENS` | No | `256` / `32` |
 | `RETRIEVE_POOL_K` / `RETRIEVE_K` | No | `20` pool / `6` kept after elbow |
 | `HYBRID_*_WEIGHT` | No | `0.5` / `0.5` |
-| `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` | No | `0.28` / `0.42` |
+| `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` | No | `0.25` / `0.42` |
 | `USE_ELBOW_GATE` / `ELBOW_MIN_GAP` / `ELBOW_MIN_RELATIVE_GAP` | No | `true` / `0.08` / `0.15` |
 | `POSTGRES_*` | No | See `.env.example`; Compose sets `POSTGRES_HOST=db` |
 
@@ -97,9 +97,9 @@ make test   # mocked retrieval/LLM
 
 **Hybrid + citations** — 0.5 cosine + 0.5 `ts_rank_cd` (procedural SOPs). `is_primary_hit` splits API citations from LLM-only section siblings.
 
-**Evidence gate** — Fused score = `0.5×cosine + 0.5×ts_rank_cd` (not raw cosine). (1) **Floor:** refuse before LLM if `max(primary score) < 0.28` — set above weak lexical bleed on out-of-scope queries; recalibrate on a labeled set. (2) **Elbow:** on up to `RETRIEVE_POOL_K=20` primaries, find the largest consecutive drop (`ELBOW_MIN_GAP=0.08`, 15% of top score); cap kept at `RETRIEVE_K=6`.
+**Evidence gate** — Fused score = `0.5×cosine + 0.5×ts_rank_cd` (not raw cosine). `EVIDENCE_THRESHOLD` (default **0.25**) is an env-tuned floor on that interim score — not derived from 0.5/0.5 weights; recalibrate on labeled queries or replace with rerank τ after RRF + cross-encoder rerank in production. (1) **Floor:** refuse before LLM if `max(primary score) < 0.25`. (2) **Elbow:** on up to `RETRIEVE_POOL_K=20` primaries, largest consecutive drop (`ELBOW_MIN_GAP=0.08`, 15% of top score); cap kept at `RETRIEVE_K=6`.
 
-**Confidence** (retrieval-only): `low` = refusal; `medium` = kept max ≥ `0.28`; `high` = kept max ≥ `0.42` **and** ≥2 kept hits (aligned with strong SOP hit band on sample queries).
+**Confidence** (retrieval-only): `low` = refusal; `medium` = kept max ≥ `0.25`; `high` = kept max ≥ `0.42` **and** ≥2 kept hits.
 
 **Not implemented:** reranking, query rewriting, streaming. **Production path:** RRF in SQL → retrieve 25–50 → cross-encoder rerank → recalibrate gate on rerank scores.
 
