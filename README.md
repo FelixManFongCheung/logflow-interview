@@ -5,7 +5,7 @@ RAG backend for logistics documents (SOPs, policies, incidents, customer notes).
 ## What It Is
 
 - **FastAPI** service with three routes: `GET /health`, `POST /documents/ingest`, `POST /query`
-- **Retrieval:** PostgreSQL 16 + pgvector hybrid search (70% cosine similarity + 30% Postgres full-text rank)
+- **Retrieval:** PostgreSQL 16 + pgvector hybrid search (50% cosine similarity + 50% Postgres full-text rank)
 - **Models:** Qwen embeddings + DeepSeek R1 reasoning chat model, both via OpenRouter
 - **Local review path:** Docker Compose runs the API and Postgres containers (`make start`)
 
@@ -64,6 +64,8 @@ Settings load from the first file found: `.env.development` → `.env` → `.env
 | `CHUNK_SIZE_TOKENS` | No | `256` |
 | `CHUNK_OVERLAP_TOKENS` | No | `32` |
 | `RETRIEVE_K` | No | `6` |
+| `HYBRID_SEMANTIC_WEIGHT` | No | `0.5` |
+| `HYBRID_LEXICAL_WEIGHT` | No | `0.5` |
 | `EVIDENCE_THRESHOLD` | No | `0.22` (hybrid score, not raw cosine) |
 | `HIGH_CONFIDENCE_THRESHOLD` | No | `0.45` |
 | `POSTGRES_*` | No | Local defaults in `.env.example`; Compose overrides `POSTGRES_HOST=db` for the API container |
@@ -204,7 +206,7 @@ Alternatives via `LLM_MODEL`: `openai/o3-mini`, `qwen/qwq-32b-preview`, `deepsee
 
 ### Vector store (PostgreSQL 16 + pgvector)
 
-- HNSW + `hybrid_search()` SQL: 0.7 semantic + 0.3 `ts_rank_cd`
+- HNSW + `hybrid_search()` SQL: 0.5 semantic + 0.5 `ts_rank_cd` (tuned for procedural SOPs, not conversational docs)
 - Section expansion by `header_path`; `is_primary_hit` splits API citations vs LLM-only siblings
 - `tenant_id` + `visibility`/`role` filtered in SQL
 
@@ -220,7 +222,7 @@ Not implemented. Hybrid fusion + section expansion is enough at ~50 chunks.
 
 ### Evidence threshold (`0.22` / `0.45`)
 
-Fused hybrid score: `0.7 × cosine + 0.3 × ts_rank_cd` — not raw cosine. Threshold `< 0.22` skips LLM; `≥ 0.45` with 2+ primary hits → high confidence. Tune via `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD`.
+Fused hybrid score: `0.5 × cosine + 0.5 × ts_rank_cd` — not raw cosine. Threshold `< 0.22` skips LLM; `≥ 0.45` with 2+ primary hits → high confidence. Tune via `HYBRID_*_WEIGHT`, `EVIDENCE_THRESHOLD`, / `HIGH_CONFIDENCE_THRESHOLD`.
 
 ## Known limitations
 
@@ -236,9 +238,14 @@ Fused hybrid score: `0.7 × cosine + 0.3 × ts_rank_cd` — not raw cosine. Thre
 
 ### Retrieval & query understanding
 - **No query rewriting** — the user question is embedded and searched as-is. There is no HyDE, synonym expansion, acronym normalisation (e.g. “POD” → “proof of delivery”), or LLM rephrase step before retrieval. Opaque, vague, or mismatched terminology often yields weak hits → controlled refusal with no second attempt.
+- **Evidence threshold is not self-tuning** — `EVIDENCE_THRESHOLD`, `HIGH_CONFIDENCE_THRESHOLD`, hybrid weights (`HYBRID_SEMANTIC_WEIGHT` / `HYBRID_LEXICAL_WEIGHT`, default 0.5/0.5), and chunk token limits are fixed env values. Changing any of them shifts the refuse/answer boundary and requires re-testing on a labeled query set (answerable / partial / unanswerable); there is no online calibration from live traffic.
 - No reranking after hybrid search — top-k order is fused score only
 - Full-text leg uses Postgres `english` config — non-English or heavy jargon/code matching is imperfect without custom dictionaries
 - Citations return chunk pointers (`chunk_id`, `header_path`, score) but not chunk body text in the API response
+
+### Tuning, loops & human review
+- **No eval / feedback loop** — no automated pipeline to log queries, score retrieval quality, compare prompt variants, or promote config changes. Tuning chunk size, fusion weights, or thresholds is manual: change env → re-seed → re-run eval queries.
+- **No human-in-the-loop (HITL)** — no UI or workflow for ops staff to mark answers wrong, fix chunk boundaries, or approve documents before indexing. Index choice (HNSW vs IVFFlat), section expansion, and ingest structure are engineer decisions, not reviewer-driven.
 
 ### Generation & product scope
 - No streaming responses — answers return only after full LLM completion

@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     RETRIEVE_K: int = 6
     EXPAND_SECTION_SIBLINGS: bool = True
     RETRIEVE_MAX_EXPANDED: int = 24
+    HYBRID_SEMANTIC_WEIGHT: float = 0.5
+    HYBRID_LEXICAL_WEIGHT: float = 0.5
     EVIDENCE_THRESHOLD: float = 0.22
     HIGH_CONFIDENCE_THRESHOLD: float = 0.45
 

@@ -47,8 +47,8 @@ CREATE OR REPLACE FUNCTION hybrid_search(
     p_query_text TEXT,
     p_query_embedding vector(1024),
     p_match_count INTEGER DEFAULT 8,
-    p_full_text_weight DOUBLE PRECISION DEFAULT 0.3,
-    p_semantic_weight DOUBLE PRECISION DEFAULT 0.7,
+    p_full_text_weight DOUBLE PRECISION DEFAULT 0.5,
+    p_semantic_weight DOUBLE PRECISION DEFAULT 0.5,
     p_role TEXT DEFAULT 'ops',
     p_expand_sections BOOLEAN DEFAULT TRUE,
     p_max_results INTEGER DEFAULT NULL

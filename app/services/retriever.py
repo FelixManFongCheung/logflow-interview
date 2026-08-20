@@ -75,13 +75,15 @@ async def hybrid_search(
         rows = await conn.execute(
             """
             SELECT chunk_id, document_id, title, content, metadata, header_path, score, is_primary_hit
-            FROM hybrid_search(%s, %s, %s::vector, %s, 0.3, 0.7, %s, %s, %s)
+            FROM hybrid_search(%s, %s, %s::vector, %s, %s, %s, %s, %s, %s)
             """,
             (
                 tenant_id,
                 question,
                 vector_literal(embedding),
                 k,
+                settings.HYBRID_LEXICAL_WEIGHT,
+                settings.HYBRID_SEMANTIC_WEIGHT,
                 role,
                 settings.EXPAND_SECTION_SIBLINGS,
                 settings.RETRIEVE_MAX_EXPANDED,
