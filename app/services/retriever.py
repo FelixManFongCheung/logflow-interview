@@ -69,7 +69,7 @@ async def hybrid_search(
 ) -> list[dict[str, Any]]:
     """Call the SQL hybrid_search RPC, scoped to tenant_id (and role) in the database."""
     embedding = await embed_query(question)
-    k = match_count or settings.RETRIEVE_K
+    k = match_count or settings.RETRIEVE_POOL_K
     pool = get_pool()
     async with pool.connection() as conn:
         rows = await conn.execute(

@@ -43,12 +43,16 @@ class Settings(BaseSettings):
     CHUNK_SIZE_TOKENS: int = 256
     CHUNK_OVERLAP_TOKENS: int = 32
     RETRIEVE_K: int = 6
+    RETRIEVE_POOL_K: int = 20
     EXPAND_SECTION_SIBLINGS: bool = True
     RETRIEVE_MAX_EXPANDED: int = 24
     HYBRID_SEMANTIC_WEIGHT: float = 0.5
     HYBRID_LEXICAL_WEIGHT: float = 0.5
     EVIDENCE_THRESHOLD: float = 0.22
     HIGH_CONFIDENCE_THRESHOLD: float = 0.45
+    USE_ELBOW_GATE: bool = True
+    ELBOW_MIN_GAP: float = 0.08
+    ELBOW_MIN_RELATIVE_GAP: float = 0.15
 
     @property
     def cors_origins(self) -> list[str]:

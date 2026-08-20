@@ -9,6 +9,38 @@ def partition_retrieval_hits(hits: list[dict[str, Any]]) -> tuple[list[dict[str,
     return primary_hits, hits
 
 
+def filter_context_hits(
+    kept_primaries: list[dict[str, Any]],
+    all_hits: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Limit LLM context to elbow-kept primaries and their section siblings."""
+    if not kept_primaries:
+        return []
+
+    kept_chunk_ids = {hit["chunk_id"] for hit in kept_primaries}
+    kept_sections = {(hit.get("document_id"), hit.get("header_path")) for hit in kept_primaries}
+
+    filtered: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
+    for hit in all_hits:
+        chunk_id = hit["chunk_id"]
+        if chunk_id in seen_chunk_ids:
+            continue
+
+        if hit.get("is_primary_hit", True):
+            if chunk_id in kept_chunk_ids:
+                filtered.append(hit)
+                seen_chunk_ids.add(chunk_id)
+            continue
+
+        section_key = (hit.get("document_id"), hit.get("header_path"))
+        if section_key in kept_sections:
+            filtered.append(hit)
+            seen_chunk_ids.add(chunk_id)
+
+    return filtered
+
+
 def format_context_block(hit: dict[str, Any]) -> str:
     is_primary = hit.get("is_primary_hit", True)
     role_label = "PRIMARY SOURCE" if is_primary else "SECTION CONTEXT"
