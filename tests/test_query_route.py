@@ -157,6 +157,60 @@ async def test_query_insufficient_evidence_skips_llm(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.asyncio
+async def test_query_elbow_drops_weak_primary_tail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Elbow gating removes low-score primaries that passed the absolute floor."""
+    hits = [
+        {
+            "document_id": "sop-001",
+            "chunk_id": "logflows-demo:sop-001:0",
+            "score": 0.88,
+            "title": "Cold Chain SOP",
+            "header_path": "Delay",
+            "metadata": {},
+            "content": "Strong hit.",
+            "is_primary_hit": True,
+        },
+        {
+            "document_id": "sop-002",
+            "chunk_id": "logflows-demo:sop-002:0",
+            "score": 0.45,
+            "title": "Other SOP",
+            "header_path": "Other",
+            "metadata": {},
+            "content": "Weak tail.",
+            "is_primary_hit": True,
+        },
+    ]
+
+    async def fake_hybrid_search(
+        tenant_id: str,
+        question: str,
+        match_count: int | None = None,
+        role: str = "ops",
+    ) -> list[dict]:
+        return hits
+
+    async def fake_generate_answer(question: str, context_blocks: list[str]) -> str:
+        assert len(context_blocks) == 1
+        return "Answer from strong hit only."
+
+    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+
+    body = QueryRequest(
+        tenant_id="logflows-demo",
+        user_id="ops-user-01",
+        role="ops",
+        question="What should we do if a cold-chain delivery is delayed?",
+    )
+    result = await query_api.query(body, Response())
+
+    assert result.success is True
+    assert len(result.data.citations) == 1
+    assert result.data.citations[0].chunk_id == "logflows-demo:sop-001:0"
+
+
+@pytest.mark.asyncio
 async def test_query_passes_tenant_and_role_to_retrieval(monkeypatch: pytest.MonkeyPatch) -> None:
     """Tenant and role from request should be passed into retrieval call."""
     observed: dict[str, str] = {}

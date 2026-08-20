@@ -1,6 +1,11 @@
 """Tests for retrieval context formatting and citation partitioning."""
 
-from app.services.context import build_llm_context_blocks, format_context_block, partition_retrieval_hits
+from app.services.context import (
+    build_llm_context_blocks,
+    filter_context_hits,
+    format_context_block,
+    partition_retrieval_hits,
+)
 
 
 def test_partition_retrieval_hits_splits_primary_from_section_siblings() -> None:
@@ -80,3 +85,38 @@ def test_build_llm_context_blocks_marks_section_siblings() -> None:
     )
 
     assert blocks[0].startswith("--- SECTION CONTEXT ---")
+
+
+def test_filter_context_hits_keeps_siblings_for_elbow_kept_primaries() -> None:
+    """Section siblings stay in LLM context only when their primary survived the elbow gate."""
+    hits = [
+        {
+            "document_id": "sop-001",
+            "chunk_id": "primary-a",
+            "score": 0.88,
+            "is_primary_hit": True,
+            "header_path": "Delay",
+            "content": "Step 1",
+        },
+        {
+            "document_id": "sop-001",
+            "chunk_id": "primary-b",
+            "score": 0.45,
+            "is_primary_hit": True,
+            "header_path": "Other",
+            "content": "Noise",
+        },
+        {
+            "document_id": "sop-001",
+            "chunk_id": "sibling-a",
+            "score": 0.88,
+            "is_primary_hit": False,
+            "header_path": "Delay",
+            "content": "Step 2",
+        },
+    ]
+    kept = [hits[0]]
+    filtered = filter_context_hits(kept, hits)
+    chunk_ids = [hit["chunk_id"] for hit in filtered]
+
+    assert chunk_ids == ["primary-a", "sibling-a"]

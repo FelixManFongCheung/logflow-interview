@@ -1,7 +1,13 @@
 """Chunking and evidence-gate unit tests."""
 
 from app.services.chunking import chunk_text
-from app.services.evidence import confidence_label, is_insufficient
+from app.services.evidence import (
+    compute_elbow_cutoff,
+    confidence_label,
+    effective_evidence_threshold,
+    filter_primary_hits,
+    is_insufficient,
+)
 
 
 def test_chunk_keeps_heading_blocks() -> None:
@@ -53,3 +59,29 @@ def test_confidence_labels() -> None:
     assert confidence_label([]) == "low"
     assert confidence_label([0.50, 0.48]) == "high"
     assert confidence_label([0.30]) == "medium"
+
+
+def test_elbow_detects_score_cliff() -> None:
+    """Largest consecutive drop sets the dynamic cutoff at the cliff edge."""
+    scores = [0.88, 0.85, 0.81, 0.45, 0.42]
+    assert compute_elbow_cutoff(scores) == 0.81
+    assert effective_evidence_threshold(scores) == 0.81
+
+
+def test_elbow_falls_back_when_gap_is_flat() -> None:
+    """Gradual score curves use the absolute floor only."""
+    scores = [0.35, 0.33, 0.31]
+    assert compute_elbow_cutoff(scores) is None
+    assert effective_evidence_threshold(scores) == 0.22
+
+
+def test_filter_primary_hits_drops_tail_after_cliff() -> None:
+    """Weak tail chunks below the elbow cutoff are removed before the LLM."""
+    primary_hits = [
+        {"chunk_id": "a", "score": 0.88},
+        {"chunk_id": "b", "score": 0.85},
+        {"chunk_id": "c", "score": 0.81},
+        {"chunk_id": "d", "score": 0.45},
+    ]
+    kept = filter_primary_hits(primary_hits)
+    assert [hit["chunk_id"] for hit in kept] == ["a", "b", "c"]
