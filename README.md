@@ -230,6 +230,53 @@ Not implemented. Hybrid fusion + section expansion is enough at ~50 chunks.
 
 Fused hybrid score: `0.5 × cosine + 0.5 × ts_rank_cd` — not raw cosine. Threshold `< 0.22` skips LLM; `≥ 0.45` with 2+ primary hits → high confidence. Tune via `HYBRID_*_WEIGHT`, `EVIDENCE_THRESHOLD`, / `HIGH_CONFIDENCE_THRESHOLD`.
 
+## Production considerations
+
+What this service does today vs what would change before a product integration.
+
+### Tenant isolation
+
+`hybrid_search()` and ingest filter on `tenant_id` in SQL; `visibility` vs caller `role` drops ops-only chunks from CS queries. That is data-plane isolation, not auth. Production needs JWT (or gateway identity) that **sets** `tenant_id` / `role` — never trust those fields from the JSON body. Row-level security (`SET LOCAL app.tenant_id`) is the next Postgres step if the API and DB share a connection pool across tenants.
+
+### Document updates and deletes
+
+Re-ingest of the same `document_id` deletes that tenant’s chunks and inserts the new set (transactional). There is no `DELETE /documents/{id}` and no tenant wipe API — ops would run SQL. Production should add delete + audit (`user_id` is already on `/query` for that). Embedding-model changes still require a full re-ingest.
+
+### Observability
+
+Today: `GET /health` plus FastAPI 4xx/5xx on ingest/query failures. No request IDs, no Langfuse traces, no metrics.
+
+Production plan:
+
+- Request ID middleware; structured logs with `tenant_id`, `user_id`, latency, hit counts, `insufficient_evidence`
+- Trace embed + retrieve + generate separately (Langfuse or OpenTelemetry) so cost and p95 split by stage
+- Metrics: query QPS, refusal rate, OpenRouter errors, Postgres pool wait
+- Sample query logs (question + citation ids, not full SOP body) for retrieval eval
+
+### Cost control
+
+Billable path is OpenRouter: Qwen embeddings on **ingest** (once per chunk) and DeepSeek R1 on **every answered query**. The evidence gate skips the chat call when `max(primary score) < 0.22`, which is the main cost brake. Keep `RETRIEVE_K` and section expansion bounded (`RETRIEVE_MAX_EXPANDED=24`) so prompt tokens stay small. Cache embeddings by content hash if the same SOP is re-uploaded unchanged. Prefer a cheaper instruct model for high-QPS CS chat; keep R1 for ops questions that need cross-doc reasoning.
+
+### Latency targets
+
+| Stage | Expected (this corpus) | Notes |
+|--------|-------------------------|--------|
+| Hybrid retrieve | tens of ms | Local pgvector; grows with corpus, not with prompt size |
+| Embed query | 100–400 ms | OpenRouter round trip |
+| Chat completion | 2–15 s | R1 reasoning; no streaming — user waits for the full answer |
+| End-to-end (answered) | ~3–20 s | Dominated by the LLM |
+| End-to-end (refusal) | ~0.2–1 s | Embed + retrieve only |
+
+Product targets: **p95 refusal under 1.5 s**, **p95 answer under 8 s** if you switch off reasoning or stream tokens. This take-home does not stream.
+
+### Privacy and security
+
+Indexed text and the user question are sent to OpenRouter (embeddings + chat). Do not put secrets, rates, or PII in sample SOPs without a DPA and a region-pinned provider. `.env` holds the API key — never commit it. CORS defaults to `*`; lock `ALLOWED_ORIGINS` in production. Postgres password in Compose is a local default; hosted DBs should use `POSTGRES_SSLMODE=require`. No rate limiting on `/query` yet — add it at the gateway so one tenant cannot burn the LLM budget.
+
+### Scaling
+
+~47 chunks is not an ANN problem. At ~1M chunks / 100 tenants: keep one Postgres with `tenant_id` in every index and RLS; partition or shard by tenant if a few customers dominate; raise HNSW `ef_search` only after measuring recall. Still retrieve a candidate pool in SQL, then rerank if quality drops. Do not put embeddings in a second database unless Postgres CPU or storage becomes the bottleneck.
+
 ## Known limitations
 
 ### Security & tenancy
