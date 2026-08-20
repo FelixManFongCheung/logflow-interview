@@ -63,11 +63,15 @@ Settings load from the first file found: `.env.development` → `.env` → `.env
 | `LLM_MODEL` | No | `google/gemma-4-26b-a4b-it:free` |
 | `CHUNK_SIZE_TOKENS` | No | `256` |
 | `CHUNK_OVERLAP_TOKENS` | No | `32` |
-| `RETRIEVE_K` | No | `6` |
+| `RETRIEVE_K` | No | `6` — max primary hits after elbow filter |
+| `RETRIEVE_POOL_K` | No | `20` — wide hybrid pool for per-query elbow |
 | `HYBRID_SEMANTIC_WEIGHT` | No | `0.5` |
 | `HYBRID_LEXICAL_WEIGHT` | No | `0.5` |
-| `EVIDENCE_THRESHOLD` | No | `0.22` (hybrid score, not raw cosine) |
+| `EVIDENCE_THRESHOLD` | No | `0.22` absolute floor (hybrid score, not raw cosine) |
 | `HIGH_CONFIDENCE_THRESHOLD` | No | `0.45` |
+| `USE_ELBOW_GATE` | No | `true` — dynamic cliff cutoff on primary scores |
+| `ELBOW_MIN_GAP` | No | `0.08` — minimum absolute score drop to trust a cliff |
+| `ELBOW_MIN_RELATIVE_GAP` | No | `0.15` — cliff must be ≥15% of top score |
 | `POSTGRES_*` | No | Local defaults in `.env.example`; Compose overrides `POSTGRES_HOST=db` for the API container |
 
 ## Routes
@@ -127,7 +131,7 @@ Retrieve tenant-scoped chunks, apply evidence gating, generate an answer.
 |-------|-------------|
 | `answer` | Grounded answer or controlled refusal text |
 | `citations` | Retrieved chunks with `document_id`, `chunk_id`, `score`, `title`, `header_path` |
-| `confidence` | `"high"` \| `"medium"` \| `"low"` from hybrid scores |
+| `confidence` | `"high"` \| `"medium"` \| `"low"` — retrieval strength from primary-hit hybrid scores (see Key decisions) |
 | `insufficient_evidence` | `true` when pre- or post-LLM refusal triggers |
 
 ## Sample data
@@ -194,7 +198,6 @@ Markdown SOPs split on `#` / `##` / `###` first; sections over 256 tokens get a 
 - 1024 dims match `vector(1024)` in schema — no migration
 - 4B over 0.6B: better on ops jargon (`HLD-QC-*`, POD, temperature bands) for ~50 chunks
 - Alternatives considered: OpenAI/Cohere embeds (second billing/integration), local sentence-transformers (ops overhead)
-- Re-ingest required if embed model changes
 
 ### Chat model (`deepseek/deepseek-r1-0528`)
 
@@ -218,64 +221,67 @@ This corpus is small (~6 docs / ~47 chunks, 1024-dim vectors). HNSW is enough; a
 
 ### Reranking
 
-Not implemented. Hybrid fusion + section expansion is enough at ~50 chunks.
+Not implemented. Elbow gating on a wide retrieve pool (`RETRIEVE_POOL_K=20`) drops weak hybrid tail before the LLM where the cliff checks pass. See **Production retrieval model (RRF + rerank)** below for the scale-out design.
 
 ### Prompt strategy
 
-- Pre-LLM: refuse if `max(primary score) < 0.22` (primary hits only)
-- LLM: sources formatted with title, headers, metadata; `PRIMARY SOURCE` vs `SECTION CONTEXT`
-- Post-LLM: clear citations if model returns `INSUFFICIENT_EVIDENCE`
+Pre-LLM: refuse when no primary hits or `max(primary score) < 0.22`; otherwise apply elbow cutoff on the pool and drop primaries below the cliff. LLM context is limited to kept primaries plus their section siblings. Post-LLM: clear citations if the model returns `INSUFFICIENT_EVIDENCE`.
 
-### Evidence threshold (`0.22` / `0.45`)
+### Evidence threshold and confidence (`0.22` / `0.45` + elbow)
 
-Fused hybrid score: `0.5 × cosine + 0.5 × ts_rank_cd` — not raw cosine. Threshold `< 0.22` skips LLM; `≥ 0.45` with 2+ primary hits → high confidence. Tune via `HYBRID_*_WEIGHT`, `EVIDENCE_THRESHOLD`, / `HIGH_CONFIDENCE_THRESHOLD`.
+Retrieval returns a fused hybrid score per chunk: `0.5 × cosine + 0.5 × ts_rank_cd`. That number is **not** raw embedding similarity — the lexical leg uses Postgres `ts_rank_cd`, which sits on a different scale than cosine. `hybrid_search()` ranks up to **20** primary candidates (`RETRIEVE_POOL_K`); only **primary hits** (`is_primary_hit=true`) feed gating and confidence. Section siblings expanded by `header_path` are included in LLM context only when their primary survived the gate.
+
+Gating is two-stage. First, an **absolute floor**: if there are no primary hits, or `max(score) < EVIDENCE_THRESHOLD` (default **0.22**), the query stops with `insufficient_evidence=true`, empty citations, and no LLM call. This catches unanswerable questions (e.g. freight rates not in the corpus) even when weak keyword noise exists.
+
+Second, an **elbow cutoff** on whatever primary scores came back from the pool (`USE_ELBOW_GATE=true`). The pool asks for up to 20 hits but often returns fewer on a small corpus — elbow runs on the scores that exist, not on a fixed count. Scores are sorted descending and the service finds the **single largest** consecutive drop anywhere in the list (not the first drop from rank #1). That gap must pass **both** checks: absolute size (`ELBOW_MIN_GAP`, default **0.08**) and relative size (`ELBOW_MIN_RELATIVE_GAP`, default **15%** of the top score). If either check fails, elbow does not activate and gating falls back to the **0.22 floor only** — which can look like “elbow kept everything” when it actually never fired.
+
+When both checks pass, the cutoff is the score at the cliff edge (the lowest score in the upper cluster) and the effective threshold is `max(0.22, elbow_cutoff)`. Primaries below it are dropped before citations and LLM context. Example with a clear cliff: 0.88 / 0.85 / 0.81 / 0.45 — largest gap 0.36, cutoff 0.81, top three kept. Example where elbow **does not** activate: on the cold-chain delay query, top scores were 0.5633 → 0.4832 (gap **0.0801**, barely above 0.08) but 0.0801 / 0.5633 ≈ **14.2%**, below the 15% relative rule — so all six primaries above 0.22 were kept up to `RETRIEVE_K=6`, including Escalation and incident chunks that a stricter first-cliff policy might have dropped. Kept primaries are always capped at `RETRIEVE_K=6`.
+
+When an answer is returned, `confidence` is a **retrieval signal for the UI**, not LLM correctness, computed from **kept** primary scores after the elbow:
+
+**`low`** — Pre- or post-LLM refusal, or scores below the floor.
+
+**`medium`** — At least one kept primary has `max(score) ≥ 0.22` but not enough for high (often a single strong hit).
+
+**`high`** — `max(score) ≥ 0.45` on kept primaries **and** at least **two** kept hits — multiple chunks agreed after the cliff filter.
+
+Citation `score` fields reflect kept primaries only. Tune `EVIDENCE_THRESHOLD`, `ELBOW_MIN_GAP`, `ELBOW_MIN_RELATIVE_GAP`, and `HYBRID_*_WEIGHT` together on the three sample query types.
+
+### Production retrieval model (RRF + rerank)
+
+This take-home fuses **unnormalized** cosine and `ts_rank_cd` with fixed 0.5/0.5 weights, then applies elbow on that custom scale — which is why thresholds like 0.22 are not portable to other fusion schemes. The intended production path replaces linear fusion with **Reciprocal Rank Fusion (RRF)** in SQL: merge semantic and keyword ranked lists by rank position (`score += weight / (k + rank)`, typically `k=60`) so no hand-tuned 0.5/0.5 blend and no mixed raw-score scales. RRF scores sit in a much lower numeric range (~0.01–0.02 for strong hits), so **`EVIDENCE_THRESHOLD` and elbow settings would be re-calibrated or replaced** — likely gating on a cross-encoder **reranker** (BGE-Reranker, Cohere Rerank) after retrieving top 25–50 RRF candidates. Elbow on the reranker score distribution, plus an absolute rerank floor, is a more stable production gate than elbow on today's fused hybrid numbers.
 
 ## Production considerations
 
-What this service does today vs what would change before a product integration.
+The sections below describe what the service does today and what would change before wiring it into a LOGFLOWS product.
 
 ### Tenant isolation
 
-`hybrid_search()` and ingest filter on `tenant_id` in SQL; `visibility` vs caller `role` drops ops-only chunks from CS queries. That is data-plane isolation, not auth. Production needs JWT (or gateway identity) that **sets** `tenant_id` / `role` — never trust those fields from the JSON body. Row-level security (`SET LOCAL app.tenant_id`) is the next Postgres step if the API and DB share a connection pool across tenants.
+Ingest and `hybrid_search()` filter on `tenant_id` in SQL, and `visibility` against the caller’s `role` keeps ops-only chunks out of CS queries. That is data-plane isolation, not authentication. In production, JWT or gateway identity should set `tenant_id` and `role` on the server — those fields must not be trusted from the request body. If the API shares a Postgres pool across tenants, row-level security with `SET LOCAL app.tenant_id` is the natural next step.
 
 ### Document updates and deletes
 
-Re-ingest of the same `document_id` deletes that tenant’s chunks and inserts the new set (transactional). There is no `DELETE /documents/{id}` and no tenant wipe API — ops would run SQL. Production should add delete + audit (`user_id` is already on `/query` for that). Embedding-model changes still require a full re-ingest.
+Re-ingesting the same `document_id` deletes that tenant’s existing chunks and inserts the new set inside one transaction. There is no delete endpoint and no tenant wipe API; operations would run SQL today. Production should add explicit delete plus audit logging — `user_id` is already on `/query` for that hook. Changing the embedding model still requires a full re-ingest because vectors are not portable across models.
 
 ### Observability
 
-Today: `GET /health` plus FastAPI 4xx/5xx on ingest/query failures. No request IDs, no Langfuse traces, no metrics.
-
-Production plan:
-
-- Request ID middleware; structured logs with `tenant_id`, `user_id`, latency, hit counts, `insufficient_evidence`
-- Trace embed + retrieve + generate separately (Langfuse or OpenTelemetry) so cost and p95 split by stage
-- Metrics: query QPS, refusal rate, OpenRouter errors, Postgres pool wait
-- Sample query logs (question + citation ids, not full SOP body) for retrieval eval
+Today the service exposes `GET /health` and returns FastAPI 4xx/5xx on ingest or query failures. There are no request IDs, Langfuse traces, or Prometheus metrics. Before production, add request-ID middleware and structured logs with `tenant_id`, `user_id`, latency, hit counts, and whether the answer was refused for insufficient evidence. Trace embed, retrieve, and generate as separate spans so cost and p95 latency split by stage. Export query QPS, refusal rate, OpenRouter errors, and Postgres pool wait. Sample query logs with the question and citation ids — not full SOP bodies — so retrieval quality can be evaluated offline.
 
 ### Cost control
 
-Billable path is OpenRouter: Qwen embeddings on **ingest** (once per chunk) and DeepSeek R1 on **every answered query**. The evidence gate skips the chat call when `max(primary score) < 0.22`, which is the main cost brake. Keep `RETRIEVE_K` and section expansion bounded (`RETRIEVE_MAX_EXPANDED=24`) so prompt tokens stay small. Cache embeddings by content hash if the same SOP is re-uploaded unchanged. Prefer a cheaper instruct model for high-QPS CS chat; keep R1 for ops questions that need cross-doc reasoning.
+The billable path runs through OpenRouter: Qwen embeddings on ingest, once per chunk, and DeepSeek R1 on every query that passes the evidence gate. The main cost brake is refusing before the LLM when `max(primary score) < 0.22`, and dropping weak tail primaries via elbow so fewer tokens reach R1. Keep `RETRIEVE_K` and section expansion bounded (`RETRIEVE_MAX_EXPANDED=24`) so prompt tokens stay small. Cache embeddings by content hash when the same SOP is re-uploaded unchanged. A cheaper instruct model may be enough for high-volume CS chat; keep R1 for ops questions that need cross-document reasoning.
 
 ### Latency targets
 
-| Stage | Expected (this corpus) | Notes |
-|--------|-------------------------|--------|
-| Hybrid retrieve | tens of ms | Local pgvector; grows with corpus, not with prompt size |
-| Embed query | 100–400 ms | OpenRouter round trip |
-| Chat completion | 2–15 s | R1 reasoning; no streaming — user waits for the full answer |
-| End-to-end (answered) | ~3–20 s | Dominated by the LLM |
-| End-to-end (refusal) | ~0.2–1 s | Embed + retrieve only |
-
-Product targets: **p95 refusal under 1.5 s**, **p95 answer under 8 s** if you switch off reasoning or stream tokens. This take-home does not stream.
+Hybrid retrieve on this corpus is tens of milliseconds locally; it grows with corpus size, not prompt size. Query embedding via OpenRouter typically adds 100–400 ms. Chat completion with R1 reasoning runs 2–15 s with no streaming, so the user waits for the full answer. End-to-end, an answered query is roughly 3–20 s and dominated by the LLM; a refusal is roughly 0.2–1 s because it stops after embed and retrieve. Reasonable product targets are p95 refusal under 1.5 s and p95 answer under 8 s if you drop reasoning or stream tokens — neither is implemented in this take-home.
 
 ### Privacy and security
 
-Indexed text and the user question are sent to OpenRouter (embeddings + chat). Do not put secrets, rates, or PII in sample SOPs without a DPA and a region-pinned provider. `.env` holds the API key — never commit it. CORS defaults to `*`; lock `ALLOWED_ORIGINS` in production. Postgres password in Compose is a local default; hosted DBs should use `POSTGRES_SSLMODE=require`. No rate limiting on `/query` yet — add it at the gateway so one tenant cannot burn the LLM budget.
+Indexed document text and the user question are sent to OpenRouter for embeddings and chat. Do not index secrets, contract rates, or PII without a DPA and a region-pinned provider. The OpenRouter key lives in `.env` and must not be committed. CORS defaults to `*`; lock `ALLOWED_ORIGINS` in production. The Compose Postgres password is a local default; hosted databases should use `POSTGRES_SSLMODE=require`. There is no rate limiting on `/query` yet — add it at the gateway so one tenant cannot exhaust the LLM budget.
 
 ### Scaling
 
-~47 chunks is not an ANN problem. At ~1M chunks / 100 tenants: keep one Postgres with `tenant_id` in every index and RLS; partition or shard by tenant if a few customers dominate; raise HNSW `ef_search` only after measuring recall. Still retrieve a candidate pool in SQL, then rerank if quality drops. Do not put embeddings in a second database unless Postgres CPU or storage becomes the bottleneck.
+Forty-seven chunks is not an approximate-nearest-neighbour problem. At roughly one million chunks across a hundred tenants, keep one Postgres with `tenant_id` on every index and enforce RLS. Partition or shard by tenant if a few customers dominate storage or QPS. Raise HNSW `ef_search` only after measuring recall on a labeled set. Replace linear 0.5/0.5 fusion with RRF in `hybrid_search()`, retrieve 25–50 candidates, rerank, then apply elbow or a rerank-score floor before the LLM — the same two-stage refuse logic, on scores meant for ranking rather than today's cosine+BM25 blend. A second vector database is justified only when Postgres CPU or storage becomes the bottleneck, not at demo size.
 
 ## Known limitations
 
@@ -291,8 +297,8 @@ Indexed text and the user question are sent to OpenRouter (embeddings + chat). D
 
 ### Retrieval & query understanding
 - **No query rewriting** — the user question is embedded and searched as-is. There is no HyDE, synonym expansion, acronym normalisation (e.g. “POD” → “proof of delivery”), or LLM rephrase step before retrieval. Opaque, vague, or mismatched terminology often yields weak hits → controlled refusal with no second attempt.
-- **Evidence threshold is not self-tuning** — `EVIDENCE_THRESHOLD`, `HIGH_CONFIDENCE_THRESHOLD`, hybrid weights (`HYBRID_SEMANTIC_WEIGHT` / `HYBRID_LEXICAL_WEIGHT`, default 0.5/0.5), and chunk token limits are fixed env values. Changing any of them shifts the refuse/answer boundary and requires re-testing on a labeled query set (answerable / partial / unanswerable); there is no online calibration from live traffic.
-- No reranking after hybrid search — top-k order is fused score only
+- **Evidence threshold is not self-tuning** — `EVIDENCE_THRESHOLD`, elbow settings, `HIGH_CONFIDENCE_THRESHOLD`, hybrid weights, and chunk token limits are fixed env values. Elbow adapts per query but still needs calibration on a labeled set; there is no online calibration from live traffic.
+- No reranking after hybrid search — elbow + fused score only; production path is RRF + cross-encoder rerank
 - Full-text leg uses Postgres `english` config — non-English or heavy jargon/code matching is imperfect without custom dictionaries
 - Citations return chunk pointers (`chunk_id`, `header_path`, score) but not chunk body text in the API response
 
