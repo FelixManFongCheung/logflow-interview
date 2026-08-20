@@ -60,7 +60,7 @@ async def embed_query(text: str) -> list[float]:
 
 
 async def generate_answer(question: str, context_blocks: list[str]) -> str:
-    """Generate a grounded answer or an explicit insufficient-evidence line."""
+    """Generate an answer or INSUFFICIENT_EVIDENCE."""
     client = get_chat_client()
     context = "\n\n".join(context_blocks) if context_blocks else "(no retrieved context)"
     completion = await client.chat.completions.create(

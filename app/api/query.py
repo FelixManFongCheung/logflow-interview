@@ -1,4 +1,4 @@
-"""Grounded query API route."""
+"""Query route."""
 
 from fastapi import APIRouter, Response
 
@@ -28,7 +28,7 @@ def _normalize_chunk_metadata(raw: object) -> dict[str, str]:
     },
 )
 async def query(body: QueryRequest, response: Response) -> CorrectResponse[QueryResponse] | ErrorResponse:
-    """Retrieve tenant-scoped chunks and answer only when evidence is strong enough."""
+    """Retrieve tenant-scoped chunks; answer or refuse based on evidence scores."""
     try:
         hits = await hybrid_search(body.tenant_id, body.question, role=body.role)
     except Exception as exc:
@@ -58,9 +58,7 @@ async def query(body: QueryRequest, response: Response) -> CorrectResponse[Query
 
     if is_insufficient(scores):
         payload = QueryResponse(
-            answer=(
-                "I do not have enough evidence in the indexed knowledge base for this tenant to answer that question."
-            ),
+            answer="Not enough indexed evidence to answer this question.",
             citations=[],
             confidence="low",
             insufficient_evidence=True,
@@ -86,10 +84,7 @@ async def query(body: QueryRequest, response: Response) -> CorrectResponse[Query
 
     if answer.strip().upper().startswith("INSUFFICIENT_EVIDENCE"):
         payload = QueryResponse(
-            answer=(
-                "The retrieved documents are related but do not contain a complete answer. "
-                "I will not guess missing operational details."
-            ),
+            answer="Retrieved sources do not contain a complete answer.",
             citations=[],
             confidence="low",
             insufficient_evidence=True,

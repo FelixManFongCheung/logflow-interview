@@ -1,6 +1,6 @@
 # LOGFLOWS Knowledge RAG
 
-Classic RAG backend for logistics knowledge documents (SOPs, policies, customer handling notes, incident reports).
+RAG backend for logistics documents (SOPs, policies, incidents, customer notes).
 
 ## What It Is
 
@@ -9,13 +9,13 @@ Classic RAG backend for logistics knowledge documents (SOPs, policies, customer 
 - **Models:** Qwen embeddings + DeepSeek R1 reasoning chat model, both via OpenRouter
 - **Local review path:** Docker Compose runs the API and Postgres containers (`make start`)
 
-Indexed operational documents only — live TMS/LMS shipment rows are out of scope for this take-home.
+Indexed documents only — live TMS/LMS rows are out of scope.
 
 ## Architecture
 
 ![LOGFLOWS Knowledge RAG — 3-layer architecture](docs/architecture.png)
 
-**Flow:** client → FastAPI routes → chunk/embed or hybrid retrieve → evidence gate → LLM (or controlled refusal) → grounded answer with citations.
+**Flow:** ingest/query → hybrid retrieve → evidence gate → LLM or refusal → answer + citations.
 
 ## Prerequisites
 
@@ -105,7 +105,7 @@ Chunk, embed, and upsert documents for a tenant. Re-ingesting the same `document
 
 ### `POST /query`
 
-Retrieve tenant-scoped chunks, apply evidence gating, then generate a grounded answer.
+Retrieve tenant-scoped chunks, apply evidence gating, generate an answer.
 
 ```json
 {
@@ -182,130 +182,45 @@ make test
 
 ## Key decisions
 
-These match `app/services/chunking.py`, `sql/schema.sql`, and `app/services/llm.py`.
-
 ### Chunk size (`CHUNK_SIZE_TOKENS=256`, overlap `32`)
 
-Sample docs are markdown SOPs with `##` / `###` sections and short tables. Flat character splitting would break tables and numbered escalation steps.
+Markdown SOPs split on `#` / `##` / `###` first; sections over 256 tokens get a second token split (32 overlap). Chunks carry `header_path` for section expansion at query time.
 
-**Strategy — two-layer hierarchical chunking:**
+### Embedding model (`qwen/qwen3-embedding-4b`, 1024 dims)
 
-1. **`MarkdownHeaderTextSplitter`** on `#` / `##` / `###` — keeps sections like “Delay handling”, “Temperature bands”, and “Escalation matrix” intact when they fit under the token cap.
-2. **`TokenTextSplitter`** only when a section exceeds **256 tokens**. Overlap **32 tokens** applies only to those oversized splits, not between sibling sections.
+- OpenRouter `/embeddings`, same client as chat; one API key
+- 1024 dims match `vector(1024)` in schema — no migration
+- 4B over 0.6B: better on ops jargon (`HLD-QC-*`, POD, temperature bands) for ~50 chunks
+- Alternatives considered: OpenAI/Cohere embeds (second billing/integration), local sentence-transformers (ops overhead)
+- Re-ingest required if embed model changes
 
-Each chunk includes document title plus inherited header breadcrumbs (`header_path`) in both content and metadata. Token counting uses `cl100k_base` (same family as LangChain's `TokenTextSplitter`).
+### Chat model (`deepseek/deepseek-r1-0528`)
 
-Legacy `CHUNK_SIZE` / `CHUNK_OVERLAP` char settings remain in config for backward compatibility; ingest uses the token settings above.
+Embeddings find semantically close text but miss nuance — cross-doc overrides, partial coverage, “out of scope” boundaries. Hybrid search + section context helps retrieval; the LLM still has to read what the blocks mean together.
 
-### Embedding model (`qwen/qwen3-embedding-4b`, 1024 dims via OpenRouter)
+Reasoning models (o-series, R1, QwQ, etc.) are used here to interpret retrieved text, not to replace search. R1 on OpenRouter: stable slug, OpenAI-compatible API, strong instruction following with `temperature=0`, lower cost than closed frontier models.
 
-**Why an embedding model at all (vs “just use a big LLM”)?**  
-Retrieval has to run on every query against ~50–50k+ chunks. Embedding + pgvector is orders of magnitude cheaper and faster than asking a frontier model to read the whole corpus each time. The embedder’s job is narrow: map text into a vector space where similar *meaning* is nearby. It is not asked to reason, cite, or refuse — that stays with the chat model.
+Alternatives via `LLM_MODEL`: `openai/o3-mini`, `qwen/qwq-32b-preview`, `deepseek/deepseek-r1-distill-qwen-32b`, or a free instruct route for smoke tests.
 
-**Why Qwen specifically (and not OpenAI `text-embedding-3-*`, Cohere, BGE, E5, etc.)?**
+### Vector store (PostgreSQL 16 + pgvector)
 
-| Factor | Why Qwen3 Embedding 4B |
-|--------|------------------------|
-| **OpenRouter + OpenAI-compatible API** | Same `/embeddings` client as chat — no second SDK or auth path |
-| **1024-dim output** | Matches `vector(1024)` in `document_chunks` / HNSW index without schema migration |
-| **Strong on technical / ops text** | Logistics SOPs mix codes (`HLD-QC-*`), temperatures, and procedural language — Qwen3 embed family scores well on MTEB-style semantic tasks vs smaller general embedders |
-| **4B over 0.6B** | Marginal quality gain on jargon and cross-lingual tokens at negligible ingest cost for ~50 chunks; 0.6B is fine for demos, 4B is the quality default |
-| **Open weights / vendor continuity** | Same model family as other Qwen routes on OpenRouter if we swap chat models later |
+- HNSW + `hybrid_search()` SQL: 0.7 semantic + 0.3 `ts_rank_cd`
+- Section expansion by `header_path`; `is_primary_hit` splits API citations vs LLM-only siblings
+- `tenant_id` + `visibility`/`role` filtered in SQL
 
-**What we did not pick:** OpenAI embeddings (excellent but ties ingest to a second provider pricing table), Cohere (great rerank/embed but another integration), open local models via sentence-transformers (adds GPU/ops burden for a take-home). Qwen on OpenRouter keeps **one API key, one bill, one HTTP shape**.
+### Reranking
 
-**Swap note:** changing embed model requires re-ingest (vectors are not compatible across models). Chat model changes do not.
-
-### Chat model (`deepseek/deepseek-r1-0528` via OpenRouter)
-
-**A reasoning model, deliberately.** Retrieval still finds the evidence; the LLM’s job is to read nuanced operational text and decide what is actually supported.
-
-The main limitation of RAG is that embedding search catches *semantically close* passages but can miss subtle nuance — cross-references between SOP sections, when a customer sheet overrides a network default, or when a doc says “out of scope” for part of the question. Hybrid search + section context helps, but the generator still has to interpret what the retrieved blocks mean together.
-
-That is why many teams reach for large reasoning models (e.g. GPT-4.5-preview): not as a cheap vector search replacement, but as a heavy, parameter-rich reader that can weigh conflicting instructions, follow multi-step procedures, and refuse when evidence is incomplete.
-
-**Why DeepSeek R1 specifically (when many reasoning models exist)?**
-
-Reasoning-capable options today include OpenAI o-series, Claude “extended thinking”, Gemini thinking, Qwen QwQ, Llama reasoning fine-tunes, NVIDIA Nemotron, distilled R1 variants, etc. **`deepseek/deepseek-r1-0528` was chosen as a practical default on OpenRouter because:**
-
-| Factor | Why DeepSeek R1 0528 |
-|--------|----------------------|
-| **Reasoning-native** | Trained for chain-of-thought — better at reconciling multiple SOP blocks, overrides, and “out of scope” boundaries than a plain instruction model |
-| **OpenRouter availability** | Stable model slug, multiple providers, OpenAI-compatible `/chat/completions` — no custom “thinking tokens” API in this codebase yet |
-| **Open-weight lineage** | Same R1 family widely benchmarked against o1-class models; easy to cite and reproduce in interviews |
-| **Grounded-use fit** | With `temperature=0` and strict prompts, R1 follows “answer only from sources / emit `INSUFFICIENT_EVIDENCE`” reliably |
-| **Cost vs frontier closed models** | Cheaper than GPT-4.5/o3-class closed APIs for a take-home, while still meaningfully stronger than free 8B instruct models on nuance |
-
-**Reasonable alternatives (not used here, same swap via `LLM_MODEL`):**
-
-- **`openai/o3-mini` / `openai/o4-mini`** — strong closed reasoning; higher cost, same OpenRouter path
-- **`qwen/qwq-32b-preview`** — Qwen reasoning line; good if staying in Qwen ecosystem end-to-end
-- **`deepseek/deepseek-r1-distill-qwen-32b`** — faster/cheaper distill; less depth on messy multi-doc synthesis
-- **Free `:free` routers** — fine for smoke tests; unstable availability and weaker nuance handling for partial/refusal cases
-
-We did **not** pick a reasoning model to replace retrieval — only to **interpret** what hybrid search returns.
-
-**Tradeoffs accepted for this take-home:**
-
-- **Cost & latency** — reasoning models are slower and billed per token (unlike a free instruct route). Reviewers need a funded OpenRouter key.
-- **Still grounded** — prompts and evidence gates unchanged; R1 must answer only from retrieved sources or return `INSUFFICIENT_EVIDENCE`.
-- **Swappable** — `LLM_MODEL` is env-driven; embeddings stay on Qwen so chat model experiments do not require re-indexing.
-
-**On the future:** capabilities and pricing move quickly — o-series, R1 variants, QwQ, and Gemini thinking will keep shifting. This stack decouples **retrieval** (Postgres hybrid search + Qwen vectors) from **generation** (OpenRouter model id) so either side can be upgraded independently.
-
-### Vector store (PostgreSQL 16 + pgvector, hybrid SQL function)
-
-One database for vectors, full-text search, tenant isolation, and role-based visibility — no separate vector DB for this scope.
-
-- **Vector index:** HNSW on `embedding` with `vector_cosine_ops`
-- **Lexical leg:** generated `tsvector` column + GIN index; `ts_rank_cd` scores keyword matches (policy ids like `SOP-001`, ticket prefixes like `HLD-QC-*`, customer codes)
-- **Retrieval RPC:** `hybrid_search(...)` in `sql/schema.sql` runs semantic and lexical searches in parallel, full-outer-joins on `chunk_id`, ranks by weighted score
-- **Section expansion:** when a hit lands in a markdown section, sibling chunks under the same `header_path` are included (up to `RETRIEVE_MAX_EXPANDED=24`) so “delay handling” returns the full procedure block, not one sentence
-- **Citations vs LLM context:** `hybrid_search` returns `is_primary_hit` — only direct top-k hits appear in API `citations`; section siblings are labeled `SECTION CONTEXT` in the LLM prompt only
-
-`tenant_id` and `visibility`/`role` filters are enforced inside the SQL function.
-
-### Reranking — not used
-
-No cross-encoder or LLM reranker after retrieval. For ~50 chunks and `RETRIEVE_K=6`, hybrid fusion plus section expansion was sufficient without a second model pass.
-
-At 100k+ chunks, add a reranker on the top ~20 hybrid hits before LLM context assembly.
+Not implemented. Hybrid fusion + section expansion is enough at ~50 chunks.
 
 ### Prompt strategy
 
-**Pre-LLM gate** (`app/services/evidence.py`): if `max(primary_hybrid_score) < EVIDENCE_THRESHOLD` (`0.22`), return a fixed refusal without calling the LLM. Scoring uses **primary hits only**, not section-expanded siblings.
+- Pre-LLM: refuse if `max(primary score) < 0.22` (primary hits only)
+- LLM: sources formatted with title, headers, metadata; `PRIMARY SOURCE` vs `SECTION CONTEXT`
+- Post-LLM: clear citations if model returns `INSUFFICIENT_EVIDENCE`
 
-**LLM path** (`app/services/prompts.py` + `app/services/context.py` + `app/services/llm.py`):
+### Evidence threshold (`0.22` / `0.45`)
 
-- Domain-specific system prompt for LOGFLOWS SOPs, customer sheets, incidents, and policies
-- Each retrieved row is formatted with: `PRIMARY SOURCE` vs `SECTION CONTEXT`, `document_id`, `chunk_id`, `title`, `header_path`, `h1`/`h2`/`h3` metadata, `retrieval_score`, and body text
-- **Primary sources** = direct hybrid-search hits (also returned as API citations)
-- **Section context** = sibling chunks from the same markdown section (LLM context only — not listed as citations)
-- Answer only from provided sources; honor “out of scope” sections; reply exactly `INSUFFICIENT_EVIDENCE` when incomplete
-- Inline citations like `[sop-001]`; `LLM_TEMPERATURE=0`
-
-**Post-LLM gate:** if the model returns `INSUFFICIENT_EVIDENCE`, citations are cleared and a controlled refusal is returned (handles partially answerable questions the score gate passed).
-
-### Evidence threshold (`0.22` / high `0.45`)
-
-The threshold applies to the **fused hybrid score**, not raw embedding cosine similarity:
-
-```sql
-score = sem_score * 0.7 + lex_score * 0.3
-```
-
-- `sem_score = 1 - cosine_distance` (roughly 0–1)
-- `lex_score = ts_rank_cd(...)` (Postgres full-text rank — different scale, often small)
-
-A cosine-style cutoff of `0.8` would reject most valid hits because semantic-only matches are scaled to `~0.7 × sem_score` before keyword contribution.
-
-| Score | Behaviour |
-|-------|-----------|
-| `< 0.22` | Pre-LLM refusal (`insufficient_evidence=true`, LLM skipped) |
-| `≥ 0.22` | LLM called; confidence `"medium"` unless higher bar met |
-| `≥ 0.45` with ≥2 hits | confidence `"high"` |
-
-Tune via `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` in `.env.development`.
+Fused hybrid score: `0.7 × cosine + 0.3 × ts_rank_cd` — not raw cosine. Threshold `< 0.22` skips LLM; `≥ 0.45` with 2+ primary hits → high confidence. Tune via `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD`.
 
 ## Known limitations
 
@@ -331,7 +246,7 @@ Tune via `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` in `.env.development
 - Reasoning chat model adds latency and OpenRouter cost per query
 
 ### Operations
-- No request tracing / eval dashboard (Langfuse, Prometheus hooks not wired in this take-home)
+- No request tracing or eval dashboard wired up
 - Hosted Postgres (e.g. Supabase) works by swapping `POSTGRES_*` env vars and setting `POSTGRES_SSLMODE=require`
 
 ## Troubleshooting Docker

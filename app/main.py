@@ -1,4 +1,4 @@
-"""Barebones FastAPI RAG service: ingest + query."""
+"""FastAPI RAG service."""
 
 from contextlib import asynccontextmanager
 
@@ -21,7 +21,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version="0.1.0",
-    description="Classic RAG over logistics knowledge documents with tenant-scoped hybrid search.",
+    description="RAG over logistics documents with tenant-scoped hybrid search.",
     lifespan=lifespan,
 )
 

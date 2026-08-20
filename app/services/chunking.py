@@ -22,25 +22,7 @@ def chunk_text(
     chunk_size_tokens: int | None = None,
     overlap_tokens: int | None = None,
 ) -> list[dict]:
-    """Split SOP-style markdown hierarchically, then sub-split by token ceiling.
-
-    Pipeline:
-        1. MarkdownHeaderTextSplitter on # / ## / ### boundaries.
-        2. TokenTextSplitter when a structural block exceeds the token limit.
-        3. Metadata heritage: parent headers copied into each child chunk.
-
-    Args:
-        document_id: Source document id.
-        title: Document title, prefixed into each chunk for retrieval.
-        text: Raw document body.
-        chunk_size: Legacy character budget; converted to tokens when token args omitted.
-        overlap: Legacy character overlap; converted to tokens when token args omitted.
-        chunk_size_tokens: Max tokens per chunk.
-        overlap_tokens: Token overlap for oversized section splits.
-
-    Returns:
-        List of chunk dicts with chunk_id, content, chunk_index, and metadata.
-    """
+    """Split markdown by headers, then by token limit when a section is too long."""
     cleaned = text.strip()
     if not cleaned:
         return []
@@ -82,7 +64,6 @@ def _resolve_token_budget(
 
 
 def _split_by_headers(text: str) -> list[Document]:
-    """Layer 1: partition on markdown heading boundaries."""
     splitter = MarkdownHeaderTextSplitter(
         headers_to_split_on=_HEADER_LEVELS,
         strip_headers=True,
@@ -95,7 +76,6 @@ def _split_oversized_blocks(
     chunk_size_tokens: int,
     overlap_tokens: int,
 ) -> list[Document]:
-    """Layer 2: recursively split blocks that exceed the token ceiling."""
     token_splitter = TokenTextSplitter(
         chunk_size=chunk_size_tokens,
         chunk_overlap=overlap_tokens,
@@ -110,7 +90,6 @@ def _split_oversized_blocks(
 
 
 def _inherit_metadata(doc: Document, document_id: str, title: str) -> dict[str, str]:
-    """Layer 3: copy inherited header context into chunk metadata."""
     metadata = {key: str(doc.metadata[key]) for key in _HEADER_KEYS if doc.metadata.get(key)}
     metadata["document_id"] = document_id
     metadata["document_title"] = title
@@ -121,7 +100,6 @@ def _inherit_metadata(doc: Document, document_id: str, title: str) -> dict[str, 
 
 
 def _build_chunk_content(title: str, metadata: dict[str, str], body: str) -> str:
-    """Render retrieval text with document title and inherited header breadcrumbs."""
     header_lines = [f"{'#' * int(key[1])} {metadata[key]}" for key in _HEADER_KEYS if metadata.get(key)]
     parts = [title]
     if header_lines:

@@ -1,4 +1,4 @@
-"""Query-route behavior tests for retrieval, refusal, and tenant/role handoff."""
+"""Query route tests."""
 
 import pytest
 from fastapi import Response
@@ -10,7 +10,7 @@ from app.schema.schemas import QueryRequest
 
 @pytest.mark.asyncio
 async def test_query_happy_path_uses_retrieval_and_returns_citations(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Strong hits should call the LLM and return grounded citations."""
+    """Strong hits call the LLM and return citations."""
     hits = [
         {
             "document_id": "sop-001",
@@ -116,7 +116,7 @@ async def test_query_citations_exclude_section_context_siblings(monkeypatch: pyt
 
 @pytest.mark.asyncio
 async def test_query_insufficient_evidence_skips_llm(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Low-score hits should return controlled refusal without calling the LLM."""
+    """Low-score hits refuse without calling the LLM."""
 
     async def fake_hybrid_search(
         tenant_id: str,

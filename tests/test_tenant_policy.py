@@ -1,4 +1,4 @@
-"""Tenant isolation is enforced in SQL, not in the prompt."""
+"""Tenant isolation tests."""
 
 from app.core.config import settings
 from app.schema.schemas import QueryRequest

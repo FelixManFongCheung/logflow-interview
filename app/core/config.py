@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     ALLOWED_ORIGINS: str = "*"
 
-    # OpenRouter is OpenAI-compatible: same /chat/completions and /embeddings paths.
+    # OpenRouter uses OpenAI-compatible /chat/completions and /embeddings.
     OPENROUTER_API_KEY: str = ""
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     EMBEDDING_MODEL: str = "qwen/qwen3-embedding-4b"

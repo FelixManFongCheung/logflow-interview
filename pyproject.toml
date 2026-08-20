@@ -1,7 +1,7 @@
 [project]
 name = "logflows-knowledge-rag"
 version = "0.1.0"
-description = "Barebones classic RAG service for LOGFLOWS knowledge documents"
+description = "RAG service for LOGFLOWS knowledge documents"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
