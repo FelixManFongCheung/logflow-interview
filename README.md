@@ -5,7 +5,7 @@ RAG backend for logistics documents (SOPs, policies, incidents, customer notes).
 **Routes:** `GET /health`, `POST /documents/ingest`, `POST /query`  
 **Flow:** ingest/query → hybrid retrieve → evidence gate (floor + elbow) → LLM or refusal → answer + citations
 
-![Architecture](docs/architecture.png)
+![Architecture](docs/architecture.jpeg)
 
 ## Quickstart (Docker)
 
