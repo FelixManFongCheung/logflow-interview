@@ -6,7 +6,7 @@ Classic RAG backend for logistics knowledge documents (SOPs, policies, customer 
 
 - **FastAPI** service with three routes: `GET /health`, `POST /documents/ingest`, `POST /query`
 - **Retrieval:** PostgreSQL 16 + pgvector hybrid search (70% cosine similarity + 30% Postgres full-text rank)
-- **Models:** Qwen embeddings and a separate chat model, both via OpenRouter
+- **Models:** Qwen embeddings + DeepSeek R1 reasoning chat model, both via OpenRouter
 - **Local review path:** Docker Compose runs the API and Postgres containers (`make start`)
 
 Indexed operational documents only — live TMS/LMS shipment rows are out of scope for this take-home.
@@ -199,21 +199,59 @@ Legacy `CHUNK_SIZE` / `CHUNK_OVERLAP` char settings remain in config for backwar
 
 ### Embedding model (`qwen/qwen3-embedding-4b`, 1024 dims via OpenRouter)
 
-- OpenRouter exposes Qwen embeddings through the OpenAI-compatible `/embeddings` endpoint already used by `app/services/llm.py`.
-- `EMBEDDING_DIMENSIONS=1024` matches the `vector(1024)` column in `document_chunks`.
-- **4B over 0.6B:** better semantic match on logistics terms (“reefer”, “quarantine load”, “wet-ink POD”, `ACME-NIGHT-*`) at negligible cost for ~50 chunks.
+**Why an embedding model at all (vs “just use a big LLM”)?**  
+Retrieval has to run on every query against ~50–50k+ chunks. Embedding + pgvector is orders of magnitude cheaper and faster than asking a frontier model to read the whole corpus each time. The embedder’s job is narrow: map text into a vector space where similar *meaning* is nearby. It is not asked to reason, cite, or refuse — that stays with the chat model.
 
-### Chat model (`google/gemma-4-26b-a4b-it:free` via OpenRouter)
+**Why Qwen specifically (and not OpenAI `text-embedding-3-*`, Cohere, BGE, E5, etc.)?**
 
-**Not a reasoning model.** Gemma 4 26B IT (`a4b-it`) is an instruction-tuned general chat model — it follows the system prompt and synthesizes answers from provided context. It is not an o1/DeepSeek-R1-style chain-of-thought reasoner, and this pipeline does not need one: retrieval and the evidence gate do the “finding facts” work; the LLM’s job is faithful summarization and citation, not multi-hop inference over unseen data.
+| Factor | Why Qwen3 Embedding 4B |
+|--------|------------------------|
+| **OpenRouter + OpenAI-compatible API** | Same `/embeddings` client as chat — no second SDK or auth path |
+| **1024-dim output** | Matches `vector(1024)` in `document_chunks` / HNSW index without schema migration |
+| **Strong on technical / ops text** | Logistics SOPs mix codes (`HLD-QC-*`), temperatures, and procedural language — Qwen3 embed family scores well on MTEB-style semantic tasks vs smaller general embedders |
+| **4B over 0.6B** | Marginal quality gain on jargon and cross-lingual tokens at negligible ingest cost for ~50 chunks; 0.6B is fine for demos, 4B is the quality default |
+| **Open weights / vendor continuity** | Same model family as other Qwen routes on OpenRouter if we swap chat models later |
 
-**Why Gemma for this take-home:**
+**What we did not pick:** OpenAI embeddings (excellent but ties ingest to a second provider pricing table), Cohere (great rerank/embed but another integration), open local models via sentence-transformers (adds GPU/ops burden for a take-home). Qwen on OpenRouter keeps **one API key, one bill, one HTTP shape**.
 
-- **Free on OpenRouter** (`:free` route) — reviewers can run end-to-end ingest/query with only an API key, no paid chat credits.
-- **Good fit for grounded extraction** — with `LLM_TEMPERATURE=0` and chunks already in the prompt, a mid-size instruction model reliably paraphrases SOP steps and returns the `INSUFFICIENT_EVIDENCE` sentinel when told to.
-- **Kept separate from embeddings** — Qwen handles vectors; chat model choice can change (e.g. swap to another OpenRouter model via `LLM_MODEL`) without re-embedding the corpus.
+**Swap note:** changing embed model requires re-ingest (vectors are not compatible across models). Chat model changes do not.
 
-**What we deliberately did not use:** a reasoning/thinking model. They add latency, cost, and verbosity for little gain when answers must come verbatim from retrieved chunks. Production would likely move to a paid, SLA-backed model (e.g. GPT-4o mini, Claude Haiku) once free-tier limits or quality become a concern.
+### Chat model (`deepseek/deepseek-r1-0528` via OpenRouter)
+
+**A reasoning model, deliberately.** Retrieval still finds the evidence; the LLM’s job is to read nuanced operational text and decide what is actually supported.
+
+The main limitation of RAG is that embedding search catches *semantically close* passages but can miss subtle nuance — cross-references between SOP sections, when a customer sheet overrides a network default, or when a doc says “out of scope” for part of the question. Hybrid search + section context helps, but the generator still has to interpret what the retrieved blocks mean together.
+
+That is why many teams reach for large reasoning models (e.g. GPT-4.5-preview): not as a cheap vector search replacement, but as a heavy, parameter-rich reader that can weigh conflicting instructions, follow multi-step procedures, and refuse when evidence is incomplete.
+
+**Why DeepSeek R1 specifically (when many reasoning models exist)?**
+
+Reasoning-capable options today include OpenAI o-series, Claude “extended thinking”, Gemini thinking, Qwen QwQ, Llama reasoning fine-tunes, NVIDIA Nemotron, distilled R1 variants, etc. **`deepseek/deepseek-r1-0528` was chosen as a practical default on OpenRouter because:**
+
+| Factor | Why DeepSeek R1 0528 |
+|--------|----------------------|
+| **Reasoning-native** | Trained for chain-of-thought — better at reconciling multiple SOP blocks, overrides, and “out of scope” boundaries than a plain instruction model |
+| **OpenRouter availability** | Stable model slug, multiple providers, OpenAI-compatible `/chat/completions` — no custom “thinking tokens” API in this codebase yet |
+| **Open-weight lineage** | Same R1 family widely benchmarked against o1-class models; easy to cite and reproduce in interviews |
+| **Grounded-use fit** | With `temperature=0` and strict prompts, R1 follows “answer only from sources / emit `INSUFFICIENT_EVIDENCE`” reliably |
+| **Cost vs frontier closed models** | Cheaper than GPT-4.5/o3-class closed APIs for a take-home, while still meaningfully stronger than free 8B instruct models on nuance |
+
+**Reasonable alternatives (not used here, same swap via `LLM_MODEL`):**
+
+- **`openai/o3-mini` / `openai/o4-mini`** — strong closed reasoning; higher cost, same OpenRouter path
+- **`qwen/qwq-32b-preview`** — Qwen reasoning line; good if staying in Qwen ecosystem end-to-end
+- **`deepseek/deepseek-r1-distill-qwen-32b`** — faster/cheaper distill; less depth on messy multi-doc synthesis
+- **Free `:free` routers** — fine for smoke tests; unstable availability and weaker nuance handling for partial/refusal cases
+
+We did **not** pick a reasoning model to replace retrieval — only to **interpret** what hybrid search returns.
+
+**Tradeoffs accepted for this take-home:**
+
+- **Cost & latency** — reasoning models are slower and billed per token (unlike a free instruct route). Reviewers need a funded OpenRouter key.
+- **Still grounded** — prompts and evidence gates unchanged; R1 must answer only from retrieved sources or return `INSUFFICIENT_EVIDENCE`.
+- **Swappable** — `LLM_MODEL` is env-driven; embeddings stay on Qwen so chat model experiments do not require re-indexing.
+
+**On the future:** capabilities and pricing move quickly — o-series, R1 variants, QwQ, and Gemini thinking will keep shifting. This stack decouples **retrieval** (Postgres hybrid search + Qwen vectors) from **generation** (OpenRouter model id) so either side can be upgraded independently.
 
 ### Vector store (PostgreSQL 16 + pgvector, hybrid SQL function)
 
@@ -271,10 +309,29 @@ Tune via `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` in `.env.development
 
 ## Known limitations
 
+### Security & tenancy
 - No JWT auth — `tenant_id`, `role`, and `user_id` are trusted from the request body
+- Tenant isolation is enforced in SQL retrieval, not caller identity — anyone who can reach the API can query any tenant id they guess
+
+### Document ingest & format
+- **Markdown-first input** — ingest expects plain `text` that is already markdown. There is no PDF/DOCX/HTML parser, OCR, or table extractor in this service; those formats must be preprocessed upstream.
+- **Structure-sensitive chunking** — quality depends on `#` / `##` / `###` headings to preserve SOP sections, tables, and escalation steps. Flat walls of text, inconsistent heading levels, or docs exported without headings chunk poorly and lose `header_path` metadata used for section expansion.
 - No document delete endpoint — re-ingest replaces chunks per `document_id`; full tenant wipe is manual SQL
-- No reranking, query rewriting, or streaming responses
+- Changing the embedding model requires a full re-ingest (vectors are not portable across models)
+
+### Retrieval & query understanding
+- **No query rewriting** — the user question is embedded and searched as-is. There is no HyDE, synonym expansion, acronym normalisation (e.g. “POD” → “proof of delivery”), or LLM rephrase step before retrieval. Opaque, vague, or mismatched terminology often yields weak hits → controlled refusal with no second attempt.
+- No reranking after hybrid search — top-k order is fused score only
+- Full-text leg uses Postgres `english` config — non-English or heavy jargon/code matching is imperfect without custom dictionaries
+- Citations return chunk pointers (`chunk_id`, `header_path`, score) but not chunk body text in the API response
+
+### Generation & product scope
+- No streaming responses — answers return only after full LLM completion
 - Live TMS/LMS operational data (shipment status, rates, contracts) is intentionally out of scope
+- Reasoning chat model adds latency and OpenRouter cost per query
+
+### Operations
+- No request tracing / eval dashboard (Langfuse, Prometheus hooks not wired in this take-home)
 - Hosted Postgres (e.g. Supabase) works by swapping `POSTGRES_*` env vars and setting `POSTGRES_SSLMODE=require`
 
 ## Troubleshooting Docker

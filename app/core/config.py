@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     EMBEDDING_MODEL: str = "qwen/qwen3-embedding-4b"
     EMBEDDING_DIMENSIONS: int = 1024
-    LLM_MODEL: str = "google/gemma-4-26b-a4b-it:free"
+    LLM_MODEL: str = "deepseek/deepseek-r1-0528"
     LLM_TEMPERATURE: float = 0.0
 
     POSTGRES_HOST: str = "localhost"

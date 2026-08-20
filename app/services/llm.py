@@ -1,4 +1,4 @@
-"""OpenRouter clients: Qwen embeddings and a separate cheap/free chat model."""
+"""OpenRouter clients: Qwen embeddings and a separate reasoning chat model."""
 
 from openai import AsyncOpenAI
 
@@ -30,7 +30,7 @@ def get_embedding_client() -> AsyncOpenAI:
 
 
 def get_chat_client() -> AsyncOpenAI:
-    """Client for POST /chat/completions (free/cheap LLM, not the embedding model)."""
+    """Client for POST /chat/completions (reasoning LLM, not the embedding model)."""
     global _chat_client
     if _chat_client is None:
         _chat_client = _make_openrouter_client()
