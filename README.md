@@ -206,7 +206,13 @@ Alternatives via `LLM_MODEL`: `openai/o3-mini`, `qwen/qwq-32b-preview`, `deepsee
 
 ### Vector store (PostgreSQL 16 + pgvector)
 
-- HNSW + `hybrid_search()` SQL: 0.5 semantic + 0.5 `ts_rank_cd` (tuned for procedural SOPs, not conversational docs)
+Chose pgvector over a dedicated vector DB (Pinecone, Weaviate, Qdrant) so chunks, metadata, full-text indexes, and embeddings live in one ACID store. Tenant/role filters, hybrid fusion, and section expansion are a single SQL function — no dual-write or sync between Postgres and a second service.
+
+Local Compose and hosted Postgres (Supabase, RDS) share the same schema; backup, SSL, and monitoring are the usual Postgres toolchain. FastAPI talks to it with async `psycopg` (`app/core/db.py`). LangChain is used only for markdown/token splitters, not as the retrieval layer.
+
+This corpus is small (~6 docs / ~47 chunks, 1024-dim vectors). HNSW is enough; a specialised ANN cluster would add ops cost without a retrieval win at this scale.
+
+- HNSW + `hybrid_search()` SQL: 0.5 cosine + 0.5 `ts_rank_cd` (procedural SOPs, not conversational docs)
 - Section expansion by `header_path`; `is_primary_hit` splits API citations vs LLM-only siblings
 - `tenant_id` + `visibility`/`role` filtered in SQL
 
