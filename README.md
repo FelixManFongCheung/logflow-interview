@@ -13,7 +13,7 @@ RAG backend for logistics documents (SOPs, policies, incidents, customer notes).
 
 ```bash
 git clone https://github.com/FelixManFongCheung/logflow-interview.git
-cd logflows-interview
+cd logflow-interview
 cp .env.example .env.development   # set OPENROUTER_API_KEY
 make start && make seed-docker     # api + db; 6 docs → tenant logflows-demo
 ```
