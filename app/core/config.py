@@ -48,8 +48,8 @@ class Settings(BaseSettings):
     RETRIEVE_MAX_EXPANDED: int = 24
     HYBRID_SEMANTIC_WEIGHT: float = 0.5
     HYBRID_LEXICAL_WEIGHT: float = 0.5
-    EVIDENCE_THRESHOLD: float = 0.22
-    HIGH_CONFIDENCE_THRESHOLD: float = 0.45
+    EVIDENCE_THRESHOLD: float = 0.28
+    HIGH_CONFIDENCE_THRESHOLD: float = 0.42
     USE_ELBOW_GATE: bool = True
     ELBOW_MIN_GAP: float = 0.08
     ELBOW_MIN_RELATIVE_GAP: float = 0.15

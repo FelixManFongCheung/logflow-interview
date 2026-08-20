@@ -1,5 +1,6 @@
 """Chunking and evidence-gate unit tests."""
 
+from app.core.config import settings
 from app.services.chunking import chunk_text
 from app.services.evidence import (
     compute_elbow_cutoff,
@@ -72,7 +73,7 @@ def test_elbow_falls_back_when_gap_is_flat() -> None:
     """Gradual score curves use the absolute floor only."""
     scores = [0.35, 0.33, 0.31]
     assert compute_elbow_cutoff(scores) is None
-    assert effective_evidence_threshold(scores) == 0.22
+    assert effective_evidence_threshold(scores) == settings.EVIDENCE_THRESHOLD
 
 
 def test_filter_primary_hits_drops_tail_after_cliff() -> None:

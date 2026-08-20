@@ -34,7 +34,7 @@ Loads from `.env.development` → `.env` → `.env.example`.
 | `CHUNK_SIZE_TOKENS` / `CHUNK_OVERLAP_TOKENS` | No | `256` / `32` |
 | `RETRIEVE_POOL_K` / `RETRIEVE_K` | No | `20` pool / `6` kept after elbow |
 | `HYBRID_*_WEIGHT` | No | `0.5` / `0.5` |
-| `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` | No | `0.22` / `0.45` |
+| `EVIDENCE_THRESHOLD` / `HIGH_CONFIDENCE_THRESHOLD` | No | `0.28` / `0.42` |
 | `USE_ELBOW_GATE` / `ELBOW_MIN_GAP` / `ELBOW_MIN_RELATIVE_GAP` | No | `true` / `0.08` / `0.15` |
 | `POSTGRES_*` | No | See `.env.example`; Compose sets `POSTGRES_HOST=db` |
 
@@ -97,11 +97,11 @@ make test   # mocked retrieval/LLM
 
 **Hybrid + citations** — 0.5 cosine + 0.5 `ts_rank_cd` (procedural SOPs). `is_primary_hit` splits API citations from LLM-only section siblings.
 
-**Evidence gate** — Fused score = `0.5×cosine + 0.5×ts_rank_cd` (not raw cosine). (1) **Floor:** refuse before LLM if `max(primary score) < 0.22`. (2) **Elbow:** on up to `RETRIEVE_POOL_K=20` primaries (often fewer on small corpus), find the **largest** consecutive score drop; it must pass **both** `ELBOW_MIN_GAP=0.08` and **15% of top score**, else elbow is off and only the floor applies. When active, drop primaries below cliff edge; cap at `RETRIEVE_K=6`. Example cliff: 0.88/0.85/0.81/0.45 → keep top three. Example no-elbow: cold-chain delay query 0.5633→0.4832 (gap 0.0801 OK, but 14.2% relative < 15%) → six citations kept above 0.22.
+**Evidence gate** — Fused score = `0.5×cosine + 0.5×ts_rank_cd` (not raw cosine). (1) **Floor:** refuse before LLM if `max(primary score) < 0.28` — set above weak lexical bleed on out-of-scope queries; recalibrate on a labeled set. (2) **Elbow:** on up to `RETRIEVE_POOL_K=20` primaries, find the largest consecutive drop (`ELBOW_MIN_GAP=0.08`, 15% of top score); cap kept at `RETRIEVE_K=6`.
 
-**Confidence** (retrieval-only, on kept primaries): `low` = refusal or below floor; `medium` = ≥0.22; `high` = ≥0.45 **and** ≥2 kept hits. Post-LLM `INSUFFICIENT_EVIDENCE` clears citations.
+**Confidence** (retrieval-only): `low` = refusal; `medium` = kept max ≥ `0.28`; `high` = kept max ≥ `0.42` **and** ≥2 kept hits (aligned with strong SOP hit band on sample queries).
 
-**Not implemented:** reranking, query rewriting, streaming. **Production path:** RRF in SQL (rank merge, ~0.01–0.02 scores) → retrieve 25–50 → cross-encoder rerank → gate on rerank scores; recalibrate or replace today's 0.22/elbow constants.
+**Not implemented:** reranking, query rewriting, streaming. **Production path:** RRF in SQL → retrieve 25–50 → cross-encoder rerank → recalibrate gate on rerank scores.
 
 ## Production considerations
 
