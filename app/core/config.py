@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     EMBEDDING_DIMENSIONS: int = 1024
     LLM_MODEL: str = "deepseek/deepseek-r1-0528"
     LLM_TEMPERATURE: float = 0.0
+    EVAL_GRADER_MODEL: str = "deepseek/deepseek-r1-0528"
 
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432

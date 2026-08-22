@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from app.api import query as query_api
 from app.schema.schemas import QueryRequest
+from app.services import query_pipeline as pipeline
 
 
 @pytest.mark.asyncio
@@ -38,8 +39,8 @@ async def test_query_happy_path_uses_retrieval_and_returns_citations(monkeypatch
         assert "header_path:" in context_blocks[0]
         return "Notify QC within 10 minutes and document logger status."
 
-    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
-    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+    monkeypatch.setattr(pipeline, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(pipeline, "generate_answer", fake_generate_answer)
 
     body = QueryRequest(
         tenant_id="logflows-demo",
@@ -96,8 +97,8 @@ async def test_query_citations_exclude_section_context_siblings(monkeypatch: pyt
         captured["context_blocks"] = context_blocks
         return "Follow the delay procedure [sop-001]."
 
-    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
-    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+    monkeypatch.setattr(pipeline, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(pipeline, "generate_answer", fake_generate_answer)
 
     body = QueryRequest(
         tenant_id="logflows-demo",
@@ -139,8 +140,8 @@ async def test_query_insufficient_evidence_skips_llm(monkeypatch: pytest.MonkeyP
     async def fake_generate_answer(question: str, context_blocks: list[str]) -> str:
         raise AssertionError("LLM should not run when evidence is insufficient")
 
-    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
-    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+    monkeypatch.setattr(pipeline, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(pipeline, "generate_answer", fake_generate_answer)
 
     body = QueryRequest(
         tenant_id="logflows-demo",
@@ -194,8 +195,8 @@ async def test_query_elbow_drops_weak_primary_tail(monkeypatch: pytest.MonkeyPat
         assert len(context_blocks) == 1
         return "Answer from strong hit only."
 
-    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
-    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+    monkeypatch.setattr(pipeline, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(pipeline, "generate_answer", fake_generate_answer)
 
     body = QueryRequest(
         tenant_id="logflows-demo",
@@ -228,8 +229,8 @@ async def test_query_passes_tenant_and_role_to_retrieval(monkeypatch: pytest.Mon
     async def fake_generate_answer(question: str, context_blocks: list[str]) -> str:
         raise AssertionError("LLM should not run when no evidence")
 
-    monkeypatch.setattr(query_api, "hybrid_search", fake_hybrid_search)
-    monkeypatch.setattr(query_api, "generate_answer", fake_generate_answer)
+    monkeypatch.setattr(pipeline, "hybrid_search", fake_hybrid_search)
+    monkeypatch.setattr(pipeline, "generate_answer", fake_generate_answer)
 
     body = QueryRequest(
         tenant_id="tenant-abc",

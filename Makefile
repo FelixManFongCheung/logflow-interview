@@ -15,7 +15,8 @@ help:
 	@echo "make seed        - ingest sample docs (host Python → localhost:5432)"
 	@echo "make seed-docker - ingest sample docs from the API container → db"
 	@echo "make test        - unit tests (no live LLM)"
-	@echo "make eval-dataset - upload eval Q&A examples to LangSmith"
+	@echo "make eval-dataset     - upload eval Q&A examples to LangSmith"
+	@echo "make eval-correctness - run LangSmith LLM-as-judge correctness eval"
 
 install:
 	uv sync
@@ -43,3 +44,6 @@ test:
 
 eval-dataset:
 	uv run python scripts/create_langsmith_dataset.py
+
+eval-correctness:
+	uv run python scripts/eval_correctness.py
