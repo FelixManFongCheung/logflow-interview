@@ -1,5 +1,8 @@
 .DEFAULT_GOAL := help
 
+# Host scripts import `app.*`; pytest sets this in pyproject.toml but `python scripts/…` does not.
+export PYTHONPATH := .
+
 # Docker Desktop on macOS installs credential helpers outside default PATH.
 DOCKER_APP_BIN := /Applications/Docker.app/Contents/Resources/bin
 ifneq (,$(wildcard $(DOCKER_APP_BIN)/docker-credential-desktop))
@@ -15,8 +18,8 @@ help:
 	@echo "make seed        - ingest sample docs (host Python → localhost:5432)"
 	@echo "make seed-docker - ingest sample docs from the API container → db"
 	@echo "make test        - unit tests (no live LLM)"
-	@echo "make eval-dataset     - upload eval Q&A examples to LangSmith"
-	@echo "make eval-correctness - run LangSmith LLM-as-judge correctness eval"
+	@echo "make eval-dataset - upload eval Q&A examples to LangSmith"
+	@echo "make eval         - run LangSmith RAG eval (correctness, groundedness, relevance, retrieval_relevance)"
 
 install:
 	uv sync
@@ -45,5 +48,5 @@ test:
 eval-dataset:
 	uv run python scripts/create_langsmith_dataset.py
 
-eval-correctness:
-	uv run python scripts/eval_correctness.py
+eval:
+	uv run python scripts/eval.py

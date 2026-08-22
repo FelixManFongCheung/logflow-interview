@@ -1,5 +1,7 @@
 """RAG query pipeline without HTTP wrappers, used by the API and LangSmith evals."""
 
+from dataclasses import dataclass
+
 from app.schema.schemas import Citation, QueryResponse
 from app.services.context import build_llm_context_blocks, filter_context_hits, partition_retrieval_hits
 from app.services.evidence import confidence_label, filter_primary_hits, is_insufficient
@@ -13,6 +15,14 @@ class RetrievalFailed(Exception):
 
 class GenerationFailed(Exception):
     """LLM generation failed after retrieval succeeded."""
+
+
+@dataclass
+class RagEvalResult:
+    """RAG response plus retrieved context blocks for LangSmith evaluators."""
+
+    response: QueryResponse
+    documents: list[str]
 
 
 def _normalize_chunk_metadata(raw: object) -> dict[str, str]:
@@ -31,22 +41,35 @@ def _refusal_payload(answer: str) -> QueryResponse:
     )
 
 
-async def run_rag_query(tenant_id: str, question: str, role: str = "ops") -> QueryResponse:
-    """Retrieve tenant-scoped chunks; answer or refuse based on evidence scores."""
+def _documents_from_hits(hits: list[dict]) -> list[str]:
+    if not hits:
+        return []
+    return build_llm_context_blocks(hits)
+
+
+async def run_rag_eval(tenant_id: str, question: str, role: str = "ops") -> RagEvalResult:
+    """Run RAG and return answer plus context blocks for eval metrics."""
     try:
         hits = await hybrid_search(tenant_id, question, role=role)
     except Exception as exc:
         raise RetrievalFailed(str(exc)) from exc
 
     primary_hits, context_hits = partition_retrieval_hits(hits)
+    retrieved_documents = _documents_from_hits(primary_hits)
     all_primary_scores = [float(hit["score"]) for hit in primary_hits]
 
     if is_insufficient(all_primary_scores):
-        return _refusal_payload("Not enough indexed evidence to answer this question.")
+        return RagEvalResult(
+            _refusal_payload("Not enough indexed evidence to answer this question."),
+            retrieved_documents,
+        )
 
     kept_primaries = filter_primary_hits(primary_hits)
     if not kept_primaries:
-        return _refusal_payload("Not enough indexed evidence to answer this question.")
+        return RagEvalResult(
+            _refusal_payload("Not enough indexed evidence to answer this question."),
+            retrieved_documents,
+        )
 
     scores = [float(hit["score"]) for hit in kept_primaries]
     citations = [
@@ -70,11 +93,22 @@ async def run_rag_query(tenant_id: str, question: str, role: str = "ops") -> Que
         raise GenerationFailed(str(exc)) from exc
 
     if answer.strip().upper().startswith("INSUFFICIENT_EVIDENCE"):
-        return _refusal_payload("Retrieved sources do not contain a complete answer.")
+        return RagEvalResult(
+            _refusal_payload("Retrieved sources do not contain a complete answer."),
+            context_blocks,
+        )
 
-    return QueryResponse(
-        answer=answer,
-        citations=citations,
-        confidence=confidence,
-        insufficient_evidence=False,
+    return RagEvalResult(
+        QueryResponse(
+            answer=answer,
+            citations=citations,
+            confidence=confidence,
+            insufficient_evidence=False,
+        ),
+        context_blocks,
     )
+
+
+async def run_rag_query(tenant_id: str, question: str, role: str = "ops") -> QueryResponse:
+    """Retrieve tenant-scoped chunks; answer or refuse based on evidence scores."""
+    return (await run_rag_eval(tenant_id, question, role=role)).response

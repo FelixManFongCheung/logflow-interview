@@ -1,8 +1,12 @@
-"""Unit tests for the domain-agnostic correctness grade parser."""
+"""Unit tests for LLM-as-judge grade parsers."""
 
 import pytest
 
 from evals.correctness import parse_correctness_grade, refusal_match
+from evals.groundedness import parse_grounded_grade
+from evals.relevance import parse_relevance_grade
+from evals.retrieval_relevance import parse_retrieval_relevance_grade
+from evals.document_utils import format_documents
 
 
 def test_parse_correctness_grade_from_plain_json() -> None:
@@ -21,6 +25,36 @@ def test_parse_correctness_grade_from_fenced_json() -> None:
 def test_parse_correctness_grade_rejects_missing_json() -> None:
     with pytest.raises(ValueError):
         parse_correctness_grade("the student is correct")
+
+
+def test_parse_relevance_grade_from_plain_json() -> None:
+    grade = parse_relevance_grade('{"explanation": "On topic.", "relevant": true}')
+    assert grade["relevant"] is True
+
+
+def test_parse_relevance_grade_from_fenced_json() -> None:
+    grade = parse_relevance_grade(
+        '```json\n{"explanation": "Off topic.", "relevant": false}\n```'
+    )
+    assert grade["relevant"] is False
+
+
+def test_parse_retrieval_relevance_grade_from_plain_json() -> None:
+    grade = parse_retrieval_relevance_grade('{"explanation": "Related topics.", "relevant": true}')
+    assert grade["relevant"] is True
+
+
+def test_parse_grounded_grade_from_plain_json() -> None:
+    grade = parse_grounded_grade('{"explanation": "Supported by facts.", "grounded": true}')
+    assert grade["grounded"] is True
+
+
+def test_format_documents_joins_strings() -> None:
+    assert "chunk-a" in format_documents(["chunk-a", "chunk-b"])
+
+
+def test_format_documents_empty() -> None:
+    assert format_documents([]) == "(no documents retrieved)"
 
 
 def test_refusal_match_detects_mismatch() -> None:

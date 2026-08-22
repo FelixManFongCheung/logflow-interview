@@ -1,72 +1,48 @@
 ---
 name: langsmith-correctness-eval
 description: >-
-  Write a domain-agnostic LangSmith LLM-as-judge correctness evaluator that
-  scores a RAG (or chat) student answer against a reference answer. Uses
-  OpenRouter via the OpenAI SDK, not LangChain ChatOpenAI. Use when adding
-  LangSmith evals, correctness graders, evaluate()/aevaluate() experiments,
-  or when swapping datasets for a new domain while keeping the same scoring
-  criteria.
+  Write domain-agnostic LangSmith LLM-as-judge evaluators for RAG (correctness,
+  relevance, groundedness, retrieval_relevance). Uses OpenRouter via the OpenAI
+  SDK, not LangChain ChatOpenAI. Use when adding LangSmith evals, evaluate()/
+  aevaluate() experiments, or swapping datasets for a new domain.
 ---
 
-# LangSmith correctness eval (OpenRouter)
+# LangSmith RAG evaluators (OpenRouter)
 
-Correctness scoring is **universal**. Domain facts live only in the dataset
-(`inputs.question` + `outputs.answer`). Do not put SOP/policy text in the
-grader prompt.
+Each metric is a **separate module** under `evals/`. Shared OpenRouter JSON
+parsing lives in `evals/grader_utils.py` only.
 
-This repo implements the pattern in:
+| Module | LangSmith key | Needs reference? | Inputs |
+|--------|---------------|------------------|--------|
+| `evals/correctness.py` | `correctness` | Yes | question + answer vs reference |
+| `evals/relevance.py` | `relevance` | No | question + answer |
+| `evals/groundedness.py` | `groundedness` | No | documents + answer |
+| `evals/retrieval_relevance.py` | `retrieval_relevance` | No | question + documents |
 
-- `evals/correctness.py` — grader + LangSmith evaluators
-- `scripts/eval_correctness.py` — `aevaluate` runner
-- `evals/dataset_examples.json` — LOGFLOWS domain examples
+Run all four: `make eval` → `scripts/eval.py` → `aevaluate(..., evaluators=[...])`.
 
-## Dataset contract
+## Target contract
 
-Each example must use this shape so one evaluator works across domains:
+The eval target must return at least:
 
-```json
+```python
 {
-  "inputs": { "question": "..." },
-  "outputs": { "answer": "..." }
+    "answer": "...",
+    "documents": ["..."],  # retrieved context blocks (strings)
 }
 ```
 
-Extra input fields (`tenant_id`, `role`, ...) are allowed. The grader only
-reads `question` and `answer`. Optional `insufficient_evidence` is scored by
-`refusal_match` (no extra LLM call).
-
-## Grader (no ChatOpenAI)
-
-Use the OpenAI SDK pointed at OpenRouter. Ask for JSON. Put `explanation`
-before `correct` so the model reasons first.
-
-Copy `CORRECTNESS_INSTRUCTIONS` and `correctness()` from `evals/correctness.py`.
-Parse JSON defensively: strip fences, then first `{` … last `}`. If
-`response_format=json_object` fails on a reasoning model, retry without it.
-
-## Target + experiment
-
-`scripts/eval_correctness.py` calls `run_rag_query` in-process and runs:
-
-```bash
-make eval-dataset      # once: upload examples
-make eval-correctness  # experiment vs LangSmith dataset
-```
-
-Env: `LANGSMITH_API_KEY`, `LANGSMITH_TRACING=true`, `OPENROUTER_API_KEY`,
-`EVAL_GRADER_MODEL` (defaults to the app chat model via OpenRouter).
+This repo uses `run_rag_eval()` in `app/services/query_pipeline.py`.
 
 ## New domain checklist
 
-1. Write a new `dataset_examples.json` for that corpus
-2. Upload with `scripts/create_langsmith_dataset.py --dataset-name "..."`
-3. Keep `evals/correctness.py` unchanged
-4. Point `aevaluate(..., data="<new dataset name>")` at the new dataset
-5. Optional extra evaluators (refusal, citations) stay separate from the judge prompt
+1. New `evals/dataset_examples.json` (questions + reference answers)
+2. `make eval-dataset`
+3. Keep grader modules unchanged
+4. `make eval`
 
 ## Do not
 
-- Put domain facts in `CORRECTNESS_INSTRUCTIONS`
-- Use `langchain_openai.ChatOpenAI` when the app is on OpenRouter
-- Score on style, length, or citation format in this judge — only factual accuracy vs ground truth
+- Put domain facts in grader prompts
+- Use `ChatOpenAI` when the app uses OpenRouter
+- Name the runner after one metric — use `scripts/eval.py` + `make eval`
