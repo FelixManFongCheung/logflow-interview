@@ -3,12 +3,15 @@
 import json
 from typing import Any
 
+from langsmith import traceable
+
 from app.core.config import settings
 from app.core.db import get_pool, vector_literal
 from app.services.chunking import chunk_text
 from app.services.llm import embed_query, embed_texts
 
 
+@traceable(name="ingest_documents", run_type="retriever")
 async def ingest_documents(tenant_id: str, documents: list[dict[str, str]]) -> dict[str, int]:
     """Replace chunks for each document id in the tenant, then insert new ones.
 
@@ -61,6 +64,7 @@ async def ingest_documents(tenant_id: str, documents: list[dict[str, str]]) -> d
     return {"documents": len(documents), "chunks": len(prepared)}
 
 
+@traceable(name="hybrid_search", run_type="retriever")
 async def hybrid_search(
     tenant_id: str,
     question: str,

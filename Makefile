@@ -15,6 +15,7 @@ help:
 	@echo "make seed        - ingest sample docs (host Python → localhost:5432)"
 	@echo "make seed-docker - ingest sample docs from the API container → db"
 	@echo "make test        - unit tests (no live LLM)"
+	@echo "make eval-dataset - upload eval Q&A examples to LangSmith"
 
 install:
 	uv sync
@@ -39,3 +40,6 @@ seed-docker:
 
 test:
 	uv run pytest -q
+
+eval-dataset:
+	uv run python scripts/create_langsmith_dataset.py

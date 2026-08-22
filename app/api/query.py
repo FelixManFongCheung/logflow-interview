@@ -1,6 +1,7 @@
 """Query route."""
 
 from fastapi import APIRouter, Response
+from langsmith import traceable
 
 from app.schema.responses import CorrectResponse, ErrorResponse, respond_correct, respond_error
 from app.schema.schemas import Citation, QueryRequest, QueryResponse
@@ -27,6 +28,7 @@ def _normalize_chunk_metadata(raw: object) -> dict[str, str]:
         502: {"model": ErrorResponse, "description": "Retrieval or generation failure"},
     },
 )
+@traceable(name="query", run_type="api")
 async def query(body: QueryRequest, response: Response) -> CorrectResponse[QueryResponse] | ErrorResponse:
     """Retrieve tenant-scoped chunks; answer or refuse based on evidence scores."""
     try:

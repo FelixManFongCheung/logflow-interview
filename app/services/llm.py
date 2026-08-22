@@ -1,5 +1,6 @@
 """OpenRouter clients: Qwen embeddings and a separate reasoning chat model."""
 
+from langsmith import traceable
 from openai import AsyncOpenAI
 
 from app.core.config import settings
@@ -37,6 +38,7 @@ def get_chat_client() -> AsyncOpenAI:
     return _chat_client
 
 
+@traceable(name="embed_texts", run_type="llm")
 async def embed_texts(texts: list[str]) -> list[list[float]]:
     """Embed a batch of strings. Empty input returns an empty list."""
     if not texts:
@@ -53,12 +55,14 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     return [item.embedding for item in response.data]
 
 
+@traceable(name="embed_query", run_type="llm")
 async def embed_query(text: str) -> list[float]:
     """Embed a single query string."""
     vectors = await embed_texts([text])
     return vectors[0]
 
 
+@traceable(name="generate_answer", run_type="llm")
 async def generate_answer(question: str, context_blocks: list[str]) -> str:
     """Generate an answer or INSUFFICIENT_EVIDENCE."""
     client = get_chat_client()

@@ -1,0 +1,110 @@
+[
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What is the allowed temperature band for chilled products in the cold chain SOP?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Chilled products must stay between 2°C and 8°C with a default set-point of 4°C. If temperature is out of band for more than 15 consecutive minutes, quarantine the load and do not deliver.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What must the dock clerk do when a cold-chain delivery is delayed more than 30 minutes past the booked customer slot?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Notify QC on-call within 10 minutes (radio QC-1 or TMS alert CC-DELAY-30), record trailer temperature from the cab display and data logger on the delay form, quarantine if out of band for more than 15 consecutive minutes, or proceed with a delay note on POD and send COLD-DELAY-NOTICE if delay exceeds 60 minutes.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What ADR labeling is required before an outbound pallet can be staged at the dock?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Each pallet must show the UN number and class diamond on two adjacent sides before staging. Labels must be ADR-compliant (minimum 100 mm × 100 mm for diamonds) and unobstructed by stretch wrap. Missing, illegible, or wrong-class diamonds mean do not load.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "When must inbound receiving stop and not open a trailer?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Do not open the trailer if the seal is broken, missing, or mismatched; there is no appointment or wrong site ASN; or ADR placards are present but the shipment is not flagged ADR in WMS. Page QC and security and hold the driver in the gate office.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What is ACME Retail's maximum chilled delivery temperature?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "ACME chilled max is 6°C, stricter than the network default of 8°C in SOP-001. Treat ACME outbound chilled as 2°C to 6°C.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What proof of delivery does ACME require for store deliveries?",
+      "role": "cs"
+    },
+    "outputs": {
+      "answer": "POD must include a wet-ink store stamp on the signed delivery note. Photo POD and ePOD without the stamp are not accepted and will be billed as failed delivery.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What happened during incident INC-2026-014 and was the load quarantined?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Shipment SH-8891 had a 22-minute Sensitech logger data gap during a traffic delay. Cab display stayed at 5°C within band. QC released the load conditionally (QC-REL-8891-CONDITIONAL); it was delivered with wet-ink POD and was not quarantined.",
+      "insufficient_evidence": false
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What are LOGFLOWS Q4 revenue targets for the Hamburg DC?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Not enough indexed evidence to answer this question.",
+      "insufficient_evidence": true
+    }
+  },
+  {
+    "inputs": {
+      "tenant_id": "logflows-demo",
+      "user_id": "eval-user",
+      "question": "What is the standard freight rate for ADR carrier surcharges?",
+      "role": "ops"
+    },
+    "outputs": {
+      "answer": "Not enough indexed evidence to answer this question.",
+      "insufficient_evidence": true
+    }
+  }
+]
